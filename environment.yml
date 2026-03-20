@@ -1,0 +1,15 @@
+name: fenitop
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - fenics-dolfinx
+  - mpi4py
+  - petsc4py
+  - numpy
+  - scipy
+  - matplotlib
+  - pyvista
+  - numba
+  - scikit-image
+  - pillow

@@ -108,7 +108,7 @@ def main():
     rho_field.x.scatter_forward()
 
     beta = 2.0
-    shell_beta.value = float(beta)
+    shell_beta.value = float(beta / 2.0)
 
     # --- Forward Pass ---
     def forward_pass():

@@ -313,26 +313,33 @@ def topopt_coating_3d(fem, opt):
 
     plot_freq = opt.get("plot_freq", 1)
     
-    loop, opt_iter, beta, change = 0, 0, 1.0, 2 * opt["opt_tol"]
+    loop, opt_iter, mma_iter, beta, change = 0, 0, 0, 1.0, 2 * opt["opt_tol"]
+    low, upp = None, None
     while opt_iter < opt["max_iter"] and change > opt["opt_tol"]:
         opt_start_time = time.perf_counter()
         opt_iter += 1
+        mma_iter += 1
         loop += 1
 
         # Base filter and projection
         density_filter.forward()
-        if opt_iter % opt["beta_interval"] == 0 and beta < opt["beta_max"]:
+        if opt_iter > 1 and (opt_iter - 1) % opt["beta_interval"] == 0 and beta < opt["beta_max"]:
             beta *= 2.0
             change = opt["opt_tol"] * 2.0
             mma_iter = 1
-            rho_old1.fill(0); rho_old2.fill(0); low = upp = None
+            # MMA restart logic to match Matlab: xold1=xval; xold2=xold1; low=xval; upp=low;
+            rho_old1[:] = rho_field.vector.array
+            rho_old2[:] = rho_old1
+            if low is not None:
+                low[:] = rho_field.vector.array
+                upp[:] = rho_field.vector.array
 
         heaviside0.forward(beta, eta=opt.get("base_eta", 0.5))
         cg1_filter_base.forward(rho_base0)
         heaviside.forward(beta, eta=opt.get("base_eta", 0.5))
 
         # SECONDARY FILTER FOR SHELL (Exactly mimics Matlab)
-        shell_beta.value = float(beta)
+        shell_beta.value = float(beta / 2.0)
         shell_filter.forward(rho_base)
 
         # Solve FEM
@@ -384,7 +391,7 @@ def topopt_coating_3d(fem, opt):
         if opt.get("use_oc", False):
             rho_new, change = optimality_criteria(rho_values, rho_min, rho_max, g_vec, dJdrho, dgdrho[0], opt["move"])
         else:
-            rho_new, change, low, upp = mma_optimizer(1, num_elems, opt_iter, rho_values, rho_min, rho_max, rho_old1, rho_old2, dJdrho, g_vec, dgdrho, low, upp, opt["move"])
+            rho_new, change, low, upp = mma_optimizer(1, num_elems, mma_iter, rho_values, rho_min, rho_max, rho_old1, rho_old2, dJdrho, g_vec, dgdrho, low, upp, opt["move"])
             rho_old2 = rho_old1.copy(); rho_old1 = rho_values.copy()
 
         rho_field.vector.array = rho_new.copy()

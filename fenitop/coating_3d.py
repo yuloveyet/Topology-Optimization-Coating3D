@@ -10,7 +10,7 @@ from dolfinx.fem import (
     Constant,
     Function,
     FunctionSpace,
-    VectorFunctionSpace,
+    functionspace,
     dirichletbc,
     locate_dofs_topological,
 )
@@ -104,16 +104,17 @@ def form_fem_coating_3d(fem, opt):
     mesh = fem["mesh"]
     dim = mesh.topology.dim
 
-    V = VectorFunctionSpace(mesh, ("CG", 1))
-    S0 = FunctionSpace(mesh, ("DG", 0))
-    S = FunctionSpace(mesh, ("CG", 1))
+    V = functionspace(mesh, ("CG", 1, (dim,)))
+    S0 = functionspace(mesh, ("DG", 0))
+    S = functionspace(mesh, ("CG", 1))
     u, v = ufl.TrialFunction(V), ufl.TestFunction(V)
 
     u_field = Function(V)
     lambda_field = Function(V)
     rho_field = Function(S0)
-    rho_base = Function(S)
-    rho_Nf = Function(S)  # Smoothed base density for shell gradient
+    rho_base0 = Function(S) # First smoothed base
+    rho_base = Function(S)  # Second smoothed base
+    rho_Nf = Function(S)    # Smoothed base density for shell gradient
 
     solid_mask = Function(S0)
     solid_mask.vector.array[:] = 0.0
@@ -209,6 +210,7 @@ def form_fem_coating_3d(fem, opt):
         linear_problem,
         u_field,
         rho_field,
+        rho_base0,
         rho_base,
         rho_Nf,
         solid_mask,
@@ -253,13 +255,18 @@ def save_density_fields_xdmf(mesh, fields, path):
 def topopt_coating_3d(fem, opt):
     comm = MPI.COMM_WORLD
     (
-        linear_problem, u_field, rho_field, rho_base, rho_Nf,
+        linear_problem, u_field, rho_field, rho_base0, rho_base, rho_Nf,
         solid_mask, shell_beta, rho_shell_expr, rho_total_expr
     ) = form_fem_coating_3d(fem, opt)
 
-    density_filter = DensityFilter(comm, rho_field, rho_base, opt["filter_radius"], fem["petsc_options"])
+    # --- Double Smoothing and Projection (DSP) Setup ---
+    # Filter 1: DG0 -> CG1
+    density_filter = DensityFilter(comm, rho_field, rho_base0, opt["filter_radius"], fem["petsc_options"])
+    heaviside0 = Heaviside(rho_base0)
+    # Filter 2: CG1 -> CG1
+    cg1_filter_base = CG1Filter(comm, rho_base0.function_space, rho_base, opt["filter_radius"], fem["petsc_options"])
     heaviside = Heaviside(rho_base)
-    # The secondary filter for the shell!
+    # The secondary filter for the shell gradient!
     rmin_shell = opt.get("filter_radius_shell", opt["filter_radius"])
     shell_filter = CG1Filter(comm, rho_base.function_space, rho_Nf, rmin_shell, fem["petsc_options"])
 
@@ -317,6 +324,11 @@ def topopt_coating_3d(fem, opt):
         if opt_iter % opt["beta_interval"] == 0 and beta < opt["beta_max"]:
             beta *= 2.0
             change = opt["opt_tol"] * 2.0
+            mma_iter = 1
+            rho_old1.fill(0); rho_old2.fill(0); low = upp = None
+
+        heaviside0.forward(beta, eta=opt.get("base_eta", 0.5))
+        cg1_filter_base.forward(rho_base0)
         heaviside.forward(beta, eta=opt.get("base_eta", 0.5))
 
         # SECONDARY FILTER FOR SHELL (Exactly mimics Matlab)
@@ -339,11 +351,7 @@ def topopt_coating_3d(fem, opt):
         dC_drho_base_vec.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
         dC_drho_Nf_vec.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
 
-        # Scale for log(C) objective BEFORE combining!
-        # This makes the optimizer minimize log(C), effectively stabilizing the MMA constraints.
-        c_scale = 1.0 / C_value if C_value > 1e-15 else 0.0
-        dC_drho_base_vec.scale(c_scale)
-        dC_drho_Nf_vec.scale(c_scale)
+        # Removed log(C) scaling to match MATLAB MMA requirements
         
         # Backpropagate shell gradient sensitivity through the secondary filter
         dC_drho_base_from_shell = shell_filter.backward(dC_drho_Nf_vec)
@@ -364,7 +372,10 @@ def topopt_coating_3d(fem, opt):
         # Combine sensitivities (Base Projection -> Density Filter)
         sensitivities = [dC_drho_base_vec, dV_drho_base_vec]
         heaviside.backward(sensitivities)
-        [dCdrho, dVdrho] = density_filter.backward(sensitivities)
+        sensitivities_0 = [cg1_filter_base.backward(v) for v in sensitivities]
+        heaviside0.backward(sensitivities_0)
+        [dCdrho, dVdrho] = density_filter.backward(sensitivities_0)
+        for v in sensitivities_0: v.destroy()
 
         g_vec = np.array([V_value - opt["vol_frac"]])
         dJdrho, dgdrho = dCdrho, np.vstack([dVdrho])

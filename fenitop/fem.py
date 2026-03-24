@@ -2,7 +2,7 @@ import numpy as np
 import ufl
 from dolfinx.mesh import locate_entities_boundary, meshtags
 from dolfinx.fem import (
-    VectorFunctionSpace,
+    functionspace,
     FunctionSpace,
     Function,
     Constant,
@@ -19,9 +19,10 @@ def form_fem(fem, opt):
 
     # * Function spaces and functions
     mesh = fem["mesh"]
-    V = VectorFunctionSpace(mesh, ("CG", 1))
-    S0 = FunctionSpace(mesh, ("DG", 0))
-    S = FunctionSpace(mesh, ("CG", 1))
+    dim = mesh.topology.dim
+    V = functionspace(mesh, ("CG", 1, (dim,)))
+    S0 = functionspace(mesh, ("DG", 0))
+    S = functionspace(mesh, ("CG", 1))
     u, v = ufl.TrialFunction(V), ufl.TestFunction(V)
     u_field = Function(V)           # Displacement field
     lambda_field = Function(V)      # Adjoint variable field

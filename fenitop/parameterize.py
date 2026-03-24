@@ -8,7 +8,7 @@ from petsc4py import PETSc
 
 class DensityFilter:
     def __init__(self, comm, rho, rho_tilde, R=1.0, petsc_options={}):
-        """Construct a PDE filter."""
+        """Construct a PDE filter from DG0 to CG1 space."""
 
         # * Initialization
         S0, S = rho.function_space, rho_tilde.function_space
@@ -22,7 +22,8 @@ class DensityFilter:
 
         # * Construct Kf and T matrices based on the Helmholtz PDE
         dx = ufl.Measure("dx", metadata={"quadrature_degree": 2})
-        Kf_expr = (R**2 * ufl.dot(ufl.grad(u), ufl.grad(v)) + u * v) * dx
+        r_pde = R / (2.0 * np.sqrt(3.0)) # Clausen et al. 2017 Eq (13)
+        Kf_expr = (r_pde**2 * ufl.dot(ufl.grad(u), ufl.grad(v)) + u * v) * dx
         T_expr = u0 * v * dx
         Kf_form, T_form = form(Kf_expr), form(T_expr)
         Kf_mat, self.T_mat = create_matrix(Kf_form), create_matrix(T_form)
@@ -74,6 +75,63 @@ class DensityFilter:
         return values
 
 
+class CG1Filter:
+    """A PDE filter mapping from a CG1 space to a CG1 space.
+    Used for secondary smoothing or DSP (Double Smoothing and Projection)."""
+
+    def __init__(self, comm, V, u_out_func, R=1.0, petsc_options={}):
+        self.V = V
+        u, v = ufl.TrialFunction(V), ufl.TestFunction(V)
+        self.u_in = Function(V)
+        self.u_out = u_out_func
+        self.u_out_wrap = la.create_petsc_vector_wrap(self.u_out.x)
+        self.lambda_adj = Function(V)
+        self.lambda_wrap = la.create_petsc_vector_wrap(self.lambda_adj.x)
+
+        dx = ufl.Measure("dx", metadata={"quadrature_degree": 2})
+        r_pde = R / (2.0 * np.sqrt(3.0)) 
+        Kf_expr = (r_pde**2 * ufl.dot(ufl.grad(u), ufl.grad(v)) + u * v) * dx
+        M_expr = u * v * dx  # Mass matrix for CG1 to CG1
+
+        Kf_form, M_form = form(Kf_expr), form(M_expr)
+        Kf_mat, self.M_mat = create_matrix(Kf_form), create_matrix(M_form)
+
+        self.solver = PETSc.KSP().create(comm)
+        self.solver.setOperators(Kf_mat)
+        prefix = f"cg1filter_{id(self)}"
+        self.solver.setOptionsPrefix(prefix)
+
+        opts = PETSc.Options()
+        opts.prefixPush(prefix)
+        for key, value in petsc_options.items():
+            opts[key] = value
+        opts.prefixPop()
+        self.solver.setFromOptions()
+        Kf_mat.setOptionsPrefix(prefix)
+        Kf_mat.setFromOptions()
+
+        assemble_matrix(Kf_mat, Kf_form)
+        Kf_mat.assemble()
+        assemble_matrix(self.M_mat, M_form)
+        self.M_mat.assemble()
+
+        self.vec_rhs = self.u_in.vector.copy()
+
+    def forward(self, u_in_func):
+        self.M_mat.mult(u_in_func.vector, self.vec_rhs)
+        self.solver.solve(self.vec_rhs, self.u_out_wrap)
+        self.u_out.x.scatter_forward()
+        return self.u_out
+
+    def backward(self, df_dout_vec):
+        """Adjoint pass: solves Kf * lambda = df_dout_vec, then returns M * lambda."""
+        self.solver.solve(df_dout_vec, self.lambda_wrap)
+        self.lambda_adj.x.scatter_forward()
+        df_din_vec = self.lambda_adj.vector.copy()
+        self.M_mat.mult(self.lambda_adj.vector, df_din_vec)
+        return df_din_vec
+
+
 class Heaviside:
     def __init__(self, rho_phys):
         self.rho_phys = rho_phys
@@ -92,3 +150,9 @@ class Heaviside:
         for vector in vectors:
             if vector is not None:
                 vector.array *= self.drho
+
+
+def tanh_projection(v, eta, beta):
+    """Symbolic projection function (tanh-based) for UFL expressions."""
+    denom = ufl.tanh(beta * eta) + ufl.tanh(beta * (1 - eta))
+    return (ufl.tanh(beta * eta) + ufl.tanh(beta * (v - eta))) / denom

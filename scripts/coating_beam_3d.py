@@ -5,16 +5,22 @@ from dolfinx.mesh import create_box, CellType
 from fenitop.coating_3d import topopt_coating_3d
 
 
-filter_radius = 5
-# 1. d_ext set to exactly 2.0 * filter_radius as per the paper's safety standard
-d_ext = 2.0 * filter_radius 
-
-# 2. Define custom physical mesh resolution (original intended density)
-mesh_res_phys = [50, 150, 50] 
+# 1. Define custom physical mesh resolution (original intended density)
+# Reduced from [50, 150, 50] to [30, 90, 30] to prevent Linux OOM (Signal 9) Killer
+mesh_res_phys = [30, 90, 30] 
 # Calculate element size (dx, dy, dz) from physical domain [10, 30, 10]
 dx, dy, dz = 10.0 / mesh_res_phys[0], 30.0 / mesh_res_phys[1], 10.0 / mesh_res_phys[2]
 
-# 3. Calculate padding elements to ensure perfect boundary alignment
+# 2. Define shell thickness and filter radii
+tref = 1.0  # Reference shell thickness
+filter_radius_shell = 2.5 * tref  # Clausen et al. 2017 specification
+
+filter_radius = 2.0 * filter_radius_shell # Base filter is 2.0x shell filter radius
+
+# 3. d_ext set to exactly 1.0 * filter_radius as per the paper and Matlab implementation
+d_ext = 1.0 * filter_radius 
+
+# 4. Calculate padding elements to ensure perfect boundary alignment
 n_pad_x = int(np.ceil(d_ext / dx))
 n_pad_z = int(np.ceil(d_ext / dz))
 # Re-calculate exact d_ext to be a multiple of element size
@@ -48,18 +54,18 @@ fem = {
     "mesh_serial": mesh_serial,
     "young's modulus": 100,
     "poisson's ratio": 0.25,
-    "disp_bc": lambda x: np.isclose(x[1], 0)
-    & (x[0] >= 0.0) & (x[0] <= 10.0) & (x[2] >= 0.0) & (x[2] <= 10.0)
-    & (np.less(x[0], 1.5) | np.greater(x[0], 8.5)),
+    "disp_bc": lambda x: np.isclose(x[1], 0.0)
+    & (x[0] >= -1e-6) & (x[0] <= 10.0 + 1e-6) & (x[2] >= -1e-6) & (x[2] <= 10.0 + 1e-6)
+    & (np.less(x[0], 1.5 + 1e-6) | np.greater(x[0], 8.5 - 1e-6)),
     "traction_bcs": [
         [
-            (0, 0, -2.0),
-            lambda x: np.isclose(x[1], 30)
+            (0.0, 0.0, -2.0),
+            lambda x: np.isclose(x[1], 30.0)
             & (
-                np.greater(x[0], 4.5)
-                & np.less(x[0], 5.5)
-                & np.greater(x[2], 4.5)
-                & np.less(x[2], 5.5)
+                np.greater(x[0], 4.5 - 1e-6)
+                & np.less(x[0], 5.5 + 1e-6)
+                & np.greater(x[2], 4.5 - 1e-6)
+                & np.less(x[2], 5.5 + 1e-6)
             ),
         ]
     ],
@@ -81,7 +87,7 @@ opt = {
     "penalty": 3.0,
     "epsilon": 1e-6,
     "filter_radius": filter_radius,
-    "filter_radius_shell": 2.5, # Crucial: shell filter must be smaller than base filter
+    "filter_radius_shell": filter_radius_shell, # Crucial: shell filter must be smaller than base filter
     "beta_interval": 20,
     "beta_max": 64,
     "use_oc": False,
@@ -90,9 +96,10 @@ opt = {
     "plot_freq": 10,
     # Parameters aligned with Clausen et al. (2017) paper
     "lambda_m": 0.7,
-    "lambda_E": 0.7 / (2.0 - 0.7), # 3D Hashin-Shtrikman upper bound (Eq. 1 in paper)
+    "lambda_E": 0.7 / (3.0 - 2.0 * 0.7), # 3D Hashin-Shtrikman upper bound
     "penal_shell": 1.0,           # Coating penalty pg=1 (Section 2.3 in paper)
     "shell_eta": 0.5,
+    "clip_bounds": [0.0, 10.0, 0.0, 30.0, 0.0, 10.0], # Bounds of the physical domain [xmin, xmax, ymin, ymax, zmin, zmax]
 }
 
 

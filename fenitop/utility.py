@@ -187,6 +187,7 @@ class Communicator:
 
         if func.vector.size != global_values.size:
             raise ValueError("Mismatched sizes.")
+        # All processes receive the same global_values from root after bcast
         func.vector.array = global_values[self.idx]
 
     def gather(self, func):
@@ -219,37 +220,46 @@ def compare_matrices(array1, array2, precision=12, k=1):
 
 
 class Plotter:
-    def __init__(self, mesh):
+    def __init__(self, mesh, mesh_serial=None):
         """Initialize a plotter."""
 
         pyvista.OFF_SCREEN = True
         pyvista.start_xvfb()
         self.dim = mesh.topology.dim
+        self.mesh_serial = mesh_serial
         elements, cell_types, nodes = dolfinx.plot.vtk_mesh(mesh, self.dim)
         self.grid = pyvista.UnstructuredGrid(elements, cell_types, nodes)
 
 
-    def plot(self, density, loop, path, threshold=0.49, smooth_iter=100, slice_normal=None, slice_origin=None):
-        self.grid.point_data["density"] = np.hstack(density)
+    def plot(self, density, loop, path, threshold=0.49, smooth_iter=100, slice_normal=None, slice_origin=None, clip_bounds=None):
+        # Create a fresh copy to avoid modifying the cached grid
+        grid = pyvista.UnstructuredGrid(self.grid)
+        # Clear existing point data
+        for name in list(grid.point_data.keys()):
+            del grid.point_data[name]
+        grid.point_data["density"] = np.hstack(density)
+
+        if self.dim == 3 and clip_bounds is not None:
+            grid = grid.clip_box(clip_bounds, invert=False)
+
         if self.dim == 2:
-            grid = self.grid
+            pass
         else:
             if slice_normal is not None and slice_origin is not None:
-                # Take a longitudinal slice first, then threshold
-                grid = self.grid.slice(normal=slice_normal, origin=slice_origin)
-                grid = grid.threshold(threshold)
-            else:
-                grid = self.grid.threshold(threshold).extract_surface()
+                # Clip to show the half opposite to the normal direction
+                grid = grid.clip(normal=slice_normal, origin=slice_origin, invert=True)
+            # Apply threshold to extract the iso-surface
+            grid = grid.threshold(threshold).extract_surface()
                 
         empty_mesh = grid.n_points == 0
 
         if not empty_mesh:
-            if self.dim == 3 and slice_normal is None:
+            if self.dim == 3:
                 grid = grid.smooth(n_iter=smooth_iter)
             
             plotter = pyvista.Plotter()
             plotter.background_color = "white"
-            lighting = self.dim == 3 and slice_normal is None
+            lighting = self.dim == 3
             plotter.add_mesh(
                 grid,
                 clim=[0, 1],
@@ -259,15 +269,37 @@ class Plotter:
             )
             if self.dim == 2:
                 plotter.view_xy()
-            elif slice_normal == 'x':
-                plotter.view_yz()
-            elif slice_normal == 'y':
-                plotter.view_xz()
-            elif slice_normal == 'z':
-                plotter.view_xy()
+            else:
+                plotter.view_isometric()
                 
             plotter.screenshot(path + "design_" + str(loop) + ".png")
             plotter.close()
+
+    def save_vtu(self, fields_dict, filename, clip_bounds=None):
+        """Save fields to VTU format after optionally clipping to bounds."""
+        # Create a fresh copy of the grid to avoid modifying the cached one
+        grid = pyvista.UnstructuredGrid(self.grid)
+        # Clear existing point data to avoid conflicts
+        for name in list(grid.point_data.keys()):
+            del grid.point_data[name]
+
+        for name, data in fields_dict.items():
+            grid.point_data[name] = np.hstack(data)
+
+        if self.dim == 3 and clip_bounds is not None:
+            grid = grid.clip_box(clip_bounds, invert=False)
+
+        grid.save(filename)
+
+    def save_xdmf(self, func, filename):
+        """Save a function to XDMF format for ParaView post-processing."""
+        from dolfinx import io
+        # Use serial mesh if available (for parallel runs), otherwise use the partitioned mesh
+        mesh_to_save = self.mesh_serial if self.mesh_serial is not None else func.function_space.mesh
+        with io.XDMFFile(mesh_to_save.comm, filename, "w") as xdmf:
+            xdmf.write_mesh(mesh_to_save)
+            func.name = "density"
+            xdmf.write_function(func)
 
 
 def save_xdmf(mesh, rho, path, filename="optimized_design.xdmf"):

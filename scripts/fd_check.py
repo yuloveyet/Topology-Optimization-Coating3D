@@ -3,6 +3,7 @@ from mpi4py import MPI
 from dolfinx.mesh import create_box, CellType
 from dolfinx.fem import assemble_scalar, form
 import ufl
+import os
 
 from fenitop.coating_3d import form_fem_coating_3d, CG1Filter
 from fenitop.parameterize import DensityFilter, Heaviside
@@ -68,11 +69,13 @@ def main():
 
     # Setup FEM
     (
-        linear_problem, u_field, rho_field, rho_base, rho_Nf,
+        linear_problem, u_field, rho_field, rho_base0, rho_base, rho_Nf,
         solid_mask, shell_beta, rho_shell_expr, rho_total_expr
     ) = form_fem_coating_3d(fem, opt)
 
-    density_filter = DensityFilter(comm, rho_field, rho_base, opt["filter_radius"], fem["petsc_options"])
+    density_filter = DensityFilter(comm, rho_field, rho_base0, opt["filter_radius"], fem["petsc_options"])
+    heaviside0 = Heaviside(rho_base0)
+    cg1_filter_base = CG1Filter(comm, rho_base0.function_space, rho_base, opt["filter_radius"], fem["petsc_options"])
     heaviside = Heaviside(rho_base)
     rmin_shell = opt.get("filter_radius_shell", opt["filter_radius"])
     shell_filter = CG1Filter(comm, rho_base.function_space, rho_Nf, rmin_shell, fem["petsc_options"])
@@ -92,10 +95,16 @@ def main():
     dV_drho_base_vec = create_vector(dV_drho_base_form)
     dV_drho_Nf_vec = create_vector(dV_drho_Nf_form)
 
-    # Randomize rho_field
+    # Initialize a solid cylinder in the middle to create a sharp structural boundary
     np.random.seed(42)
     num_elems = rho_field.vector.array.size
-    rho_field.vector.array[:] = np.random.uniform(0.1, 0.9, num_elems)
+    centers = rho_field.function_space.tabulate_dof_coordinates()[:num_elems]
+    
+    # Distance to the center axis (x=5, z=5)
+    dist_to_axis = np.sqrt((centers[:, 0] - 5.0)**2 + (centers[:, 2] - 5.0)**2)
+    
+    # Set inside the cylinder to 0.9, outside to 0.1, with some random noise
+    rho_field.vector.array[:] = np.where(dist_to_axis < 2.5, 0.9, 0.1) + np.random.uniform(-0.05, 0.05, num_elems)
     rho_field.x.scatter_forward()
 
     beta = 2.0
@@ -104,6 +113,8 @@ def main():
     # --- Forward Pass ---
     def forward_pass():
         density_filter.forward()
+        heaviside0.forward(beta, eta=opt.get("base_eta", 0.5))
+        cg1_filter_base.forward(rho_base0)
         heaviside.forward(beta, eta=opt.get("base_eta", 0.5))
         shell_filter.forward(rho_base)
         linear_problem.solve_fem()
@@ -121,10 +132,7 @@ def main():
     dC_drho_base_vec.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
     dC_drho_Nf_vec.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
 
-    # Scale for log(C)
-    c_scale = 1.0 / C_value if C_value > 1e-15 else 0.0
-    dC_drho_base_vec.scale(c_scale)
-    dC_drho_Nf_vec.scale(c_scale)
+    # Removed log(C) scaling
     
     dC_drho_base_from_shell = shell_filter.backward(dC_drho_Nf_vec)
     dC_drho_base_vec.axpy(1.0, dC_drho_base_from_shell) 
@@ -142,17 +150,28 @@ def main():
 
     sensitivities = [dC_drho_base_vec, dV_drho_base_vec]
     heaviside.backward(sensitivities)
-    [dCdrho, dVdrho] = density_filter.backward(sensitivities)
+    sensitivities_0 = [cg1_filter_base.backward(v) for v in sensitivities]
+    heaviside0.backward(sensitivities_0)
+    [dCdrho, dVdrho] = density_filter.backward(sensitivities_0)
+    for v in sensitivities_0: v.destroy()
 
     analytical_dC = dCdrho.copy()
     analytical_dV = dVdrho.copy()
 
-    # Select random elements
-    np.random.seed(123)
-    if num_elems > 0:
-        test_indices = np.random.choice(num_elems, min(5, num_elems), replace=False)
+    # Selection of elements specifically at the structural boundary (where rho_shell is active)
+    import time
+    np.random.seed(int(time.time())) 
+    # Calculate distance to axis again
+    dist_to_axis = np.sqrt((centers[:, 0] - 5.0)**2 + (centers[:, 2] - 5.0)**2)
+    
+    # Boundary elements are those near the cylinder surface (radius 2.5)
+    boundary_indices = np.where((dist_to_axis > 2.0) & (dist_to_axis < 3.0))[0]
+    
+    if len(boundary_indices) > 0:
+        test_indices = np.random.choice(boundary_indices, min(5, len(boundary_indices)), replace=False)
     else:
-        test_indices = []
+        # Fallback if no elements found in the band
+        test_indices = np.random.choice(num_elems, min(5, num_elems), replace=False)
 
     print("Starting Finite Difference Check...")
     print(f"Base C: {C_value:.6e}, Base V: {V_value:.6e}")
@@ -161,14 +180,19 @@ def main():
     errors_V_dict = {i: [] for i in test_indices}
     dh_values = [1e-3, 1e-4, 1e-5, 1e-6, 1e-7]
 
+    analytical_dC_vals = {i: analytical_dC[i] for i in test_indices}
+    numerical_dC_vals = {i: [] for i in test_indices}
+    analytical_dV_vals = {i: analytical_dV[i] for i in test_indices}
+    numerical_dV_vals = {i: [] for i in test_indices}
+
     for i in test_indices:
         a_dC = analytical_dC[i]
         a_dV = analytical_dV[i]
         
         print(f"\n--- Element {i} ---")
-        print(f"Analytical d(logC)/drho: {a_dC: .6e}")
+        print(f"Analytical dC/drho: {a_dC: .6e}")
         print(f"Analytical dV/drho:      {a_dV: .6e}")
-        print(f"{'dh':<10} | {'FD d(logC)':<15} | {'Error %':<10} | {'FD dV':<15} | {'Error %':<10}")
+        print(f"{'dh':<10} | {'FD dC':<15} | {'Error %':<10} | {'FD dV':<15} | {'Error %':<10}")
         print("-" * 75)
             
         orig_val = rho_field.vector.array[i]
@@ -189,47 +213,69 @@ def main():
             rho_field.x.scatter_forward()
             
             # FD
-            fd_dC = (np.log(C_plus) - np.log(C_minus)) / (2 * dh)
+            fd_dC = (C_plus - C_minus) / (2 * dh)
             fd_dV = (V_plus - V_minus) / (2 * dh)
             
-            err_C = abs(fd_dC - a_dC) / max(abs(a_dC), 1e-15) * 100
-            err_V = abs(fd_dV - a_dV) / max(abs(a_dV), 1e-15) * 100
+            err_C = max(abs(fd_dC - a_dC) / max(abs(a_dC), 1e-15) * 100, 1e-10)
+            err_V = max(abs(fd_dV - a_dV) / max(abs(a_dV), 1e-15) * 100, 1e-10)
             
             errors_C_dict[i].append(err_C)
             errors_V_dict[i].append(err_V)
+            
+            numerical_dC_vals[i].append(fd_dC)
+            numerical_dV_vals[i].append(fd_dV)
             
             print(f"{dh:<10.1e} | {fd_dC:<15.6e} | {err_C:<10.4f} | {fd_dV:<15.6e} | {err_V:<10.4f}")
 
     try:
         import matplotlib.pyplot as plt
-        plt.figure(figsize=(12, 5))
+        fig, axs = plt.subplots(2, 2, figsize=(15, 10))
 
-        plt.subplot(1, 2, 1)
+        # Plot 1: Error convergence for dC/drho
         for i in test_indices:
-            plt.loglog(dh_values, errors_C_dict[i], marker='o', label=f'Elem {i}')
-        plt.xlabel('Step size (dh)')
-        plt.ylabel('Relative Error (%)')
-        plt.title('Sensitivity Error: Objective (log C)')
-        plt.grid(True, which="both", ls="--", alpha=0.5)
-        plt.legend()
+            axs[0,0].loglog(dh_values, errors_C_dict[i], marker='o', label=f'Elem {i}')
+        axs[0,0].set_title('Sensitivity Error Convergence: dC/drho')
+        axs[0,0].set_xlabel('Step size (dh)')
+        axs[0,0].set_ylabel('Relative Error (%)')
+        axs[0,0].legend()
+        axs[0,0].grid(True, which="both", ls="--", alpha=0.5)
+        axs[0,0].invert_xaxis()  # Larger dh on left for check mark shape
 
-        plt.subplot(1, 2, 2)
+        # Plot 2: Error convergence for dV/drho
         for i in test_indices:
-            plt.loglog(dh_values, errors_V_dict[i], marker='o', label=f'Elem {i}')
-        plt.xlabel('Step size (dh)')
-        plt.ylabel('Relative Error (%)')
-        plt.title('Sensitivity Error: Volume (V)')
-        plt.grid(True, which="both", ls="--", alpha=0.5)
-        plt.legend()
+            axs[0,1].loglog(dh_values, errors_V_dict[i], marker='o', label=f'Elem {i}')
+        axs[0,1].set_title('Sensitivity Error Convergence: dV/drho')
+        axs[0,1].set_xlabel('Step size (dh)')
+        axs[0,1].set_ylabel('Relative Error (%)')
+        axs[0,1].legend()
+        axs[0,1].grid(True, which="both", ls="--", alpha=0.5)
+        axs[0,1].invert_xaxis()  # Larger dh on left for check mark shape
 
-        plt.tight_layout()
-        out_plot = 'results/fd_check_results.png'
-        import os
-        os.makedirs('results', exist_ok=True)
-        plt.savefig(out_plot, dpi=300)
-        print(f"\n=> Successfully saved convergence plot to {out_plot}")
-    except ImportError:
-        print("\n=> Matplotlib not installed. Skipping plot generation.")
+        # Plot 3: Analytical vs Numerical values for dC sensitivity
+        for i in test_indices:
+            axs[1,0].loglog(dh_values, np.abs(numerical_dC_vals[i]), marker='x', label=f'FD Elem {i}')
+            axs[1,0].axhline(y=abs(analytical_dC_vals[i]), color='gray', linestyle='--', alpha=0.5)
+        axs[1,0].set_title('FD dC/drho vs dh (should converge to analytical)')
+        axs[1,0].set_xlabel('Step size (dh)')
+        axs[1,0].set_ylabel('|dC/drho|')
+        axs[1,0].legend()
+        axs[1,0].grid(True, which="both", ls="--", alpha=0.5)
+        axs[1,0].invert_xaxis()
+
+        # Plot 4: Analytical vs Numerical values for V sensitivity
+        for i in test_indices:
+            axs[1,1].loglog(dh_values, np.abs(numerical_dV_vals[i]), marker='x', label=f'FD Elem {i}')
+            axs[1,1].axhline(y=abs(analytical_dV_vals[i]), color='gray', linestyle='--', alpha=0.5)
+        axs[1,1].set_title('FD dV/drho vs dh (should converge to analytical)')
+        axs[1,1].set_xlabel('Step size (dh)')
+        axs[1,1].set_ylabel('|dV/drho|')
+        axs[1,1].legend()
+        axs[1,1].grid(True, which="both", ls="--", alpha=0.5)
+        axs[1,1].invert_xaxis()
+
+        plt.tight_layout(); os.makedirs('results', exist_ok=True)
+        plt.savefig('results/fd_check_distribution.png', dpi=300)
+    except ImportError: pass
 
 if __name__ == '__main__':
     main()

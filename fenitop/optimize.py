@@ -179,10 +179,10 @@ def solve_subproblem(
     xi = np.maximum(1.0 / (x - alpha), 1.0)
     eta = np.maximum(1.0 / (beta - x), 1.0)
     _lambda = np.ones(m)
-    if comm.rank == 0:
-        y, z, s = np.ones(m), 1.0, np.ones(m)
-        mu = np.maximum(0.5 * c, 1.0)
-        zeta = 1.0
+    # Initialize MMA subproblem variables on ALL processes to ensure consistency
+    y, z, s = np.ones(m), 1.0, np.ones(m)
+    mu = np.maximum(0.5 * c, 1.0)
+    zeta = 1.0
 
     while eps > epsimin:  # Primal-dual interior point method
         p_lambda = p0 + _lambda @ P_mat

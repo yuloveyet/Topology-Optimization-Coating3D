@@ -9,6 +9,9 @@ __pycache__/
 results/*
 !results/.gitkeep
 
+# Ignore meshes entirely as they are procedurally generated in scripts
+meshes/
+
 # Ignore non-code or reference files
 Matlab/
 images/
@@ -18,7 +21,7 @@ excise.ipynb
 index.html
 paper.pdf
 
-# Only keep core fenitop files related to coating_beam_3d
+# Only keep core fenitop files related to 3D coating
 fenitop/*
 !fenitop/coating_3d.py
 !fenitop/parameterize.py
@@ -30,3 +33,8 @@ fenitop/*
 scripts/*
 !scripts/coating_beam_3d.py
 !scripts/fd_check.py
+
+# Keep environment config
+!environment.yml
+!README.md
+!GEMINI.md

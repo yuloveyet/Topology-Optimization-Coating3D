@@ -240,7 +240,10 @@ def topopt_coating_3d(fem, opt):
 
     plot_freq = opt.get("plot_freq", 1)
     
-    loop, opt_iter, mma_iter, beta, change = 0, 0, 0, 8.0, 1.0
+    beta_initial = opt.get("beta_initial", 1.0)
+    beta_inc = opt.get("beta_inc", 1.2)
+    
+    loop, opt_iter, mma_iter, beta, change = 0, 0, 0, beta_initial, 1.0
     low, upp = None, None
     while opt_iter < opt["max_iter"] and (change > opt["opt_tol"] or beta < opt["beta_max"]):
         opt_start_time = time.perf_counter()
@@ -251,7 +254,7 @@ def topopt_coating_3d(fem, opt):
         # Base filter and projection
         density_filter.forward()
         if opt_iter > 1 and (opt_iter % opt["beta_interval"] == 0 or change <= opt["opt_tol"]) and beta < opt["beta_max"]:
-            beta *= 1.2
+            beta *= beta_inc
             change = 1.0
             mma_iter = 1
             # MMA restart logic to match Matlab: xold1=xval; xold2=xold1; low=xval; upp=low;

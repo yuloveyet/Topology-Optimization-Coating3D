@@ -11,7 +11,7 @@ mesh_res_phys = [40, 120, 40]
 dx, dy, dz = 10.0 / mesh_res_phys[0], 30.0 / mesh_res_phys[1], 10.0 / mesh_res_phys[2]
 
 # 2. Define shell thickness and filter radii
-tref = 0.4  # Reference shell thickness
+tref = 2  # Reference shell thickness
 filter_radius_shell = 2.5 * tref  # Clausen et al. 2017 specification
 
 filter_radius = 2.0 * filter_radius_shell  # Base filter is 2.0x shell filter radius
@@ -115,7 +115,7 @@ fem = {
 }
 
 opt = {
-    "max_iter": 500,
+    "max_iter": 200,
     "opt_tol": 1e-3,
     "vol_frac": 0.20,
     "solid_zone": lambda x: np.full(x.shape[1], False),
@@ -132,15 +132,17 @@ opt = {
     "epsilon": 1e-6,
     "filter_radius": filter_radius,
     "filter_radius_shell": filter_radius_shell,  # Crucial: shell filter must be smaller than base filter
-    "beta_interval": 50,
+    "beta_initial": 1.0,
+    "beta_inc": 2,
+    "beta_interval": 20,
     "beta_max": 64,
     "use_oc": False,
     "move": 0.05,
     "opt_compliance": True,
     "plot_freq": 10,
     # Parameters aligned with Clausen et al. (2017) paper
-    "lambda_m": 0.4,
-    "q_ext_padding": 0.2, # Soft modulus for padding region
+    "lambda_m": 0.5,
+    "q_ext_padding": 0.2,  # Soft modulus for padding region
     "penal_shell": 1.0,  # Coating penalty pg=1 (Section 2.3 in paper)
     "shell_eta": 0.5,
     "clip_bounds": [

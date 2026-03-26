@@ -31,10 +31,14 @@ conda activate fenitop
 
 **Core Dependencies:**
 - `python >= 3.10`
-- `fenics-dolfinx`
-- `mpi4py`
-- `petsc4py`
-- `pyvista` (for fast PNG slicing)
+- `fenics-dolfinx >= 0.8.0` (DOLFINx)
+- `mpi4py >= 3.1.0`
+- `petsc4py >= 3.18.0`
+- `numpy >= 1.21.0`
+- `scipy >= 1.7.0`
+- `pyvista >= 0.34.0`
+- `numba >= 0.55.0`
+- `scikit-image >= 0.19.0`
 
 ## Usage
 
@@ -62,4 +66,15 @@ All results are saved in a time-stamped directory under `results/` (synchronized
 - `design_*.xdmf`: Raw 3D density fields (`rho_total`) ready for rendering and thresholding in ParaView.
 
 ## Acknowledgements
-This implementation is heavily inspired by the theoretical derivations of the TopOpt research group at DTU. The codebase translates their methodology into the modern FEniCSx (DOLFINx) paradigm.
+The codebase, named **fenitop**, translates the coating methodology into the modern FEniCSx (DOLFINx) paradigm.
+
+## Citation
+
+If you use **fenitop** in your research or project, please cite the following work:
+
+```text
+Jia, Y., Wang, C., & Zhang, X. S. (2024). FEniTop: a simple FEniCSx implementation for 2D and 3D topology optimization supporting parallel computing. Structural and Multidisciplinary Optimization, 67(6), 84.
+```
+
+Additionally, please cite the foundational work for the 3D shell optimization theory:
+> **Clausen, A., Andreassen, E., & Sigmund, O. (2017).** *Topology optimization of 3D shell structures with porous infill.* Acta Mechanica Sinica, 33(4), 778-791.

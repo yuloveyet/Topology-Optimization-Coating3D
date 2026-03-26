@@ -1,9 +1,18 @@
 __pycache__/
 *.py[cod]
 *$py.class
-results/
-pattern3D lab/
-*.pdf
 .DS_Store
 .idea/
 .vscode/
+
+# Ignore results content but keep the directory
+results/*
+!results/.gitkeep
+
+# Ignore other non-code or personal files
+Matlab/
+images/
+.ai-temp/
+AI coding rule.md
+excise.ipynb
+index.html

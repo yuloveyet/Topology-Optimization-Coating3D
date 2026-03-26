@@ -1,7 +1,7 @@
 import numpy as np
 import ufl
 from dolfinx import la
-from dolfinx.fem import Function, form
+from dolfinx.fem import Function, form, Constant
 from dolfinx.fem.petsc import create_matrix, assemble_matrix
 from petsc4py import PETSc
 
@@ -77,7 +77,7 @@ class DensityFilter:
 
 class CG1Filter:
     """A PDE filter mapping from a CG1 space to a CG1 space.
-    Used for secondary smoothing or DSP (Double Smoothing and Projection)."""
+    Used for secondary smoothing """
 
     def __init__(self, comm, V, u_out_func, R=1.0, petsc_options={}):
         self.V = V
@@ -117,6 +117,15 @@ class CG1Filter:
 
         self.vec_rhs = self.u_in.vector.copy()
 
+        alpha = Constant(self.V.mesh, float(R / np.sqrt(3.0)))
+        self.grad_norm = alpha * ufl.sqrt(ufl.inner(ufl.grad(self.u_out), ufl.grad(self.u_out)) + 1e-12)
+        self.rho_shell_func = Function(V)
+
+    def get_rho_shell_expr(self, eta, beta):
+        import ufl
+        denominator = ufl.tanh(beta * eta) + ufl.tanh(beta * (1.0 - eta))
+        return (ufl.tanh(beta * eta) + ufl.tanh(beta * (self.grad_norm - eta))) / denominator
+
     def forward(self, u_in_func):
         self.M_mat.mult(u_in_func.vector, self.vec_rhs)
         self.solver.solve(self.vec_rhs, self.u_out_wrap)
@@ -150,9 +159,3 @@ class Heaviside:
         for vector in vectors:
             if vector is not None:
                 vector.array *= self.drho
-
-
-def tanh_projection(v, eta, beta):
-    """Symbolic projection function (tanh-based) for UFL expressions."""
-    denom = ufl.tanh(beta * eta) + ufl.tanh(beta * (1 - eta))
-    return (ufl.tanh(beta * eta) + ufl.tanh(beta * (v - eta))) / denom

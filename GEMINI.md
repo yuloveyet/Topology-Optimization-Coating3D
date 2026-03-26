@@ -60,6 +60,18 @@
         - 修复了 `Plotter` 的 PNG 裁切与 XDMF 序列保存逻辑。
         - 优化了 `fd_check.py` 的对数坐标轴绘图展示。
 
+- [x] **2026-03-26**:
+    - [x] **物理模型与插值公式精细化**:
+        - **扩展区域模量缩放**: 引入 `q_ext_padding` (默认 0.2)，在 `padding_mask` 区域内弱化材料刚度，确保物理边界清晰。
+        - **3D Hashin-Shtrikman 自动化**: 在 `coating_3d.py` 中实现了 `lambda_E` 的自动计算公式 $\lambda_E = \lambda_m / (2 - \lambda_m)$，并支持 `opt` 手动覆盖。
+    - [x] **初始密度与边界条件优化**:
+        - **初始场设定**: 设计域初始化为 `vol_frac`，扩展区域初始化为 `0.0` 且 `rho_max` 锁定为 `0.01`，彻底消除 Padding 区的结构伪影。
+    - [x] **可视化增强**:
+        - **裁剪功能集成**: `Plotter.plot` 现在支持通过 `clip_bounds` 自动裁剪掉扩展区域，PNG 切片图将仅显示物理设计域。
+        - **代码清理**: 移除了 `utility.py` 中冗余的 `save_vtu` 和 `save_xdmf` 类方法，统一使用全局高效函数。
+    - [x] **灵敏度验证增强**:
+        - 更新 `fd_check.py` 以支持 6 个特定点（3 个内部点，3 个边界点）的有限差分对比，并增加了对采样点选择的鲁棒性检查（解决 `ValueError`）。
+
 ## 运行规范
 - **正式计算**: `mpirun -n [核心数] python3 scripts/coating_beam_3d.py`
 - **梯度验证**: `python3 scripts/fd_check.py` (单核运行)

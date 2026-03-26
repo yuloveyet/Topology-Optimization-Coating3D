@@ -275,33 +275,6 @@ class Plotter:
             plotter.screenshot(path + "design_" + str(loop) + ".png")
             plotter.close()
 
-    def save_vtu(self, fields_dict, filename, clip_bounds=None):
-        """Save fields to VTU format after optionally clipping to bounds."""
-        # Create a fresh copy of the grid to avoid modifying the cached one
-        grid = pyvista.UnstructuredGrid(self.grid)
-        # Clear existing point data to avoid conflicts
-        for name in list(grid.point_data.keys()):
-            del grid.point_data[name]
-
-        for name, data in fields_dict.items():
-            grid.point_data[name] = np.hstack(data)
-
-        if self.dim == 3 and clip_bounds is not None:
-            grid = grid.clip_box(clip_bounds, invert=False)
-
-        grid.save(filename)
-
-    def save_xdmf(self, func, filename):
-        """Save a function to XDMF format for ParaView post-processing."""
-        from dolfinx import io
-        # Use serial mesh if available (for parallel runs), otherwise use the partitioned mesh
-        mesh_to_save = self.mesh_serial if self.mesh_serial is not None else func.function_space.mesh
-        with io.XDMFFile(mesh_to_save.comm, filename, "w") as xdmf:
-            xdmf.write_mesh(mesh_to_save)
-            func.name = "density"
-            xdmf.write_function(func)
-
-
 def save_xdmf(mesh, rho, path, filename="optimized_design.xdmf"):
     xdmf = dolfinx.io.XDMFFile(mesh.comm, path + filename, "w")
     xdmf.write_mesh(mesh)

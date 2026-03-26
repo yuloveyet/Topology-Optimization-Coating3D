@@ -26,7 +26,7 @@ from dolfinx.fem.petsc import (
 from petsc4py import PETSc
 from ufl import Measure
 
-from fenitop.parameterize import DensityFilter, Heaviside
+from fenitop.parameterize import DensityFilter, Heaviside, CG1Filter
 from fenitop.optimize import optimality_criteria, mma_optimizer
 from fenitop.utility import (
     Communicator,
@@ -35,69 +35,6 @@ from fenitop.utility import (
     get_date_str,
     save_xdmf,
 )
-
-
-class CG1Filter:
-    """A PDE filter mapping from a CG1 space to a CG1 space.
-    Used for the secondary smoothing of the base physical density
-    to compute smooth gradient norms for the shell/coating."""
-
-    def __init__(self, comm, V, u_out_func, R=1.0, petsc_options={}):
-        self.V = V
-        u, v = ufl.TrialFunction(V), ufl.TestFunction(V)
-        self.u_in = Function(V)
-        self.u_out = u_out_func
-        self.u_out_wrap = la.create_petsc_vector_wrap(self.u_out.x)
-        self.lambda_adj = Function(V)
-        self.lambda_wrap = la.create_petsc_vector_wrap(self.lambda_adj.x)
-
-        dx = ufl.Measure("dx", metadata={"quadrature_degree": 2})
-        Kf_expr = (R**2 * ufl.dot(ufl.grad(u), ufl.grad(v)) + u * v) * dx
-        M_expr = u * v * dx  # Mass matrix for CG1 to CG1
-
-        Kf_form, M_form = form(Kf_expr), form(M_expr)
-        Kf_mat, self.M_mat = create_matrix(Kf_form), create_matrix(M_form)
-
-        self.solver = PETSc.KSP().create(comm)
-        self.solver.setOperators(Kf_mat)
-        prefix = f"cg1filter_{id(self)}"
-        self.solver.setOptionsPrefix(prefix)
-
-        opts = PETSc.Options()
-        opts.prefixPush(prefix)
-        for key, value in petsc_options.items():
-            opts[key] = value
-        opts.prefixPop()
-        self.solver.setFromOptions()
-        Kf_mat.setOptionsPrefix(prefix)
-        Kf_mat.setFromOptions()
-
-        assemble_matrix(Kf_mat, Kf_form)
-        Kf_mat.assemble()
-        assemble_matrix(self.M_mat, M_form)
-        self.M_mat.assemble()
-
-        self.vec_rhs = self.u_in.vector.copy()
-
-    def forward(self, u_in_func):
-        self.M_mat.mult(u_in_func.vector, self.vec_rhs)
-        self.solver.solve(self.vec_rhs, self.u_out_wrap)
-        self.u_out.x.scatter_forward()
-        return self.u_out
-
-    def backward(self, df_dout_vec):
-        """Adjoint pass: solves Kf * lambda = df_dout_vec, then returns M * lambda."""
-        self.solver.solve(df_dout_vec, self.lambda_wrap)
-        self.lambda_adj.x.scatter_forward()
-        df_din_vec = self.lambda_adj.vector.copy()
-        self.M_mat.mult(self.lambda_adj.vector, df_din_vec)
-        return df_din_vec
-
-
-def _prj(v, eta, beta):
-    """Projection function (tanh-based)."""
-    denom = ufl.tanh(beta * eta) + ufl.tanh(beta * (1 - eta))
-    return (ufl.tanh(beta * eta) + ufl.tanh(beta * (v - eta))) / denom
 
 
 def form_fem_coating_3d(fem, opt):
@@ -112,43 +49,46 @@ def form_fem_coating_3d(fem, opt):
     u_field = Function(V)
     lambda_field = Function(V)
     rho_field = Function(S0)
-    rho_base0 = Function(S) # First smoothed base
-    rho_base = Function(S)  # Second smoothed base
-    rho_Nf = Function(S)    # Smoothed base density for shell gradient
+    rho_base = Function(S)  # Base density
+    rho_nf = Function(S)    # Filtered base density
 
-    solid_mask = Function(S0)
-    solid_mask.vector.array[:] = 0.0
+    # Padding/void mask for zone-dependent q_ext
+    padding_mask = Function(S0)
+    num_elems_local = padding_mask.vector.array.size
+    centers = S0.tabulate_dof_coordinates()[:num_elems_local]
+    padding_mask.vector.array[:] = opt["void_zone"](centers.T).astype(float)
 
     E0 = fem["young's modulus"]
     nu = fem["poisson's ratio"]
     penal = opt["penalty"]
     penal_shell = opt.get("penal_shell", 1.0)
     lambda_m = opt.get("lambda_m", 0.7)
-    lambda_E = opt.get("lambda_E", 0.4)
+    #lambda_E = opt.get("lambda_E", 0.4)
     lambda_Emin = opt.get("lambda_Emin", opt.get("epsilon", 1e-6))
     q_ext = opt.get("q_ext", 1.0)
 
-    # Shell gradient norm + projection based on rho_Nf
-    # In fenitop, filter_radius is directly used as the PDE parameter R.
-    # The gradient of a PDE-filtered step function maxes out at 1/(2R).
-    # To normalize this gradient to exactly 1.0 at the boundary, alpha must be 2*R.
     rmin_shell = opt.get("filter_radius_shell", opt["filter_radius"])
-    alpha = Constant(mesh, float(2.0 * rmin_shell))
-    # Add 1e-12 to avoid sqrt(0) singularity which causes NaN in sensitivities!
-    grad_norm = alpha * ufl.sqrt(ufl.inner(ufl.grad(rho_Nf), ufl.grad(rho_Nf)) + 1e-12)
+    shell_filter = CG1Filter(mesh.comm, S, rho_nf, rmin_shell, fem["petsc_options"])
 
     shell_eta = opt.get("shell_eta", 0.5)
     shell_beta = Constant(mesh, float(1.0))
-    rho_shell_expr = _prj(grad_norm, shell_eta, shell_beta)
-    rho_shell = solid_mask * 1.0 + (1.0 - solid_mask) * rho_shell_expr
+    rho_shell_expr = shell_filter.get_rho_shell_expr(shell_eta, shell_beta)
+    rho_shell = rho_shell_expr
 
-    # Material interpolation
+    # Material interpolation with zone-dependent q_ext (padding zone: 0.2, design zone: 1.0)
     rho_total = lambda_m * rho_base + (1.0 - lambda_m * rho_base) * rho_shell
     rho_base_p = rho_base**penal
+    q_ext_padding = opt.get("q_ext_padding", 0.2)
+    q_ext_zone = ufl.conditional(padding_mask > 0.5, q_ext_padding, q_ext)
+    
+    # 3D Hashin-Shtrikman upper bound: rho / (2.0 - rho) for Young's modulus
+    lambda_E_hs = lambda_m / (2.0 - lambda_m)
+    lambda_E = opt.get("lambda_E", lambda_E_hs)
+    
     E = E0 * (
         lambda_Emin
-        + q_ext * (lambda_E - lambda_Emin) * rho_base_p
-        + q_ext * (1.0 - lambda_E * rho_base_p) * rho_shell**penal_shell
+        + q_ext_zone * (lambda_E - lambda_Emin) * rho_base_p
+        + q_ext_zone * (1.0 - lambda_E * rho_base_p) * rho_shell**penal_shell
     )
 
     def epsilon(w):
@@ -194,29 +134,23 @@ def form_fem_coating_3d(fem, opt):
 
     linear_problem = LinearProblem(u_field, lambda_field, lhs, rhs, l_vec=None, spring_vec=None, bcs=[bc], petsc_options=fem["petsc_options"])
 
-    # Pass void mask to define physical volume for Vf normalization
-    void_mask_for_vol = Function(S0)
-    num_elems_local = void_mask_for_vol.vector.array.size
-    centers = S0.tabulate_dof_coordinates()[:num_elems_local]
-    void_mask_for_vol.vector.array[:] = opt["void_zone"](centers.T).astype(float)
-    
+    # Volume normalization uses padding_mask
     opt["compliance"] = ufl.inner(sigma(u_field), epsilon(u_field)) * dx
-    
+
     # Volume calculation in whole mesh (extended), but normalized by physical domain volume
     opt["volume"] = rho_total * dx
-    opt["total_volume"] = (1.0 - void_mask_for_vol) * dx
+    opt["total_volume"] = (1.0 - padding_mask) * dx
 
     return (
         linear_problem,
         u_field,
         rho_field,
-        rho_base0,
         rho_base,
-        rho_Nf,
-        solid_mask,
+        rho_nf,
         shell_beta,
         rho_shell_expr,
         rho_total,
+        shell_filter,
     )
 
 
@@ -255,36 +189,31 @@ def save_density_fields_xdmf(mesh, fields, path):
 def topopt_coating_3d(fem, opt):
     comm = MPI.COMM_WORLD
     (
-        linear_problem, u_field, rho_field, rho_base0, rho_base, rho_Nf,
-        solid_mask, shell_beta, rho_shell_expr, rho_total_expr
+        linear_problem, u_field, rho_field, rho_base, rho_nf,
+        shell_beta, rho_shell_expr, rho_total_expr,
+        shell_filter
     ) = form_fem_coating_3d(fem, opt)
 
-    # --- Double Smoothing and Projection (DSP) Setup ---
-    # Filter 1: DG0 -> CG1
-    density_filter = DensityFilter(comm, rho_field, rho_base0, opt["filter_radius"], fem["petsc_options"])
-    heaviside0 = Heaviside(rho_base0)
-    # Filter 2: CG1 -> CG1
-    cg1_filter_base = CG1Filter(comm, rho_base0.function_space, rho_base, opt["filter_radius"], fem["petsc_options"])
+    # --- Smoothing and Projection Setup ---
+    # Filter: DG0 -> CG1
+    density_filter = DensityFilter(comm, rho_field, rho_base, opt["filter_radius"], fem["petsc_options"])
     heaviside = Heaviside(rho_base)
-    # The secondary filter for the shell gradient!
-    rmin_shell = opt.get("filter_radius_shell", opt["filter_radius"])
-    shell_filter = CG1Filter(comm, rho_base.function_space, rho_Nf, rmin_shell, fem["petsc_options"])
 
     # Forms for manual sensitivities using UFL automatic differentiation
     C_form = form(opt["compliance"])
     V_form = form(opt["volume"])
     total_vol = comm.allreduce(assemble_scalar(form(opt["total_volume"])), op=MPI.SUM)
 
-    # Partial derivatives w.r.t rho_base (direct) and rho_Nf (via shell)
+    # Partial derivatives w.r.t rho_base and rho_nf
     dC_drho_base_form = form(-ufl.derivative(opt["compliance"], rho_base))
-    dC_drho_Nf_form = form(-ufl.derivative(opt["compliance"], rho_Nf))
     dV_drho_base_form = form(ufl.derivative(opt["volume"], rho_base))
-    dV_drho_Nf_form = form(ufl.derivative(opt["volume"], rho_Nf))
+    dC_drho_nf_form = form(-ufl.derivative(opt["compliance"], rho_nf))
+    dV_drho_nf_form = form(ufl.derivative(opt["volume"], rho_nf))
 
     dC_drho_base_vec = create_vector(dC_drho_base_form)
-    dC_drho_Nf_vec = create_vector(dC_drho_Nf_form)
     dV_drho_base_vec = create_vector(dV_drho_base_form)
-    dV_drho_Nf_vec = create_vector(dV_drho_Nf_form)
+    dC_drho_nf_vec = create_vector(dC_drho_nf_form)
+    dV_drho_nf_vec = create_vector(dV_drho_nf_form)
 
     S_comm = Communicator(rho_base.function_space, fem["mesh_serial"])
     if comm.rank == 0:
@@ -298,12 +227,10 @@ def topopt_coating_3d(fem, opt):
     centers = rho_field.function_space.tabulate_dof_coordinates()[:num_elems].T
     solid, void = opt["solid_zone"](centers), opt["void_zone"](centers)
     rho_ini = np.full(num_elems, opt["vol_frac"])
-    rho_ini[solid], rho_ini[void] = 0.995, 0.005
+    rho_ini[solid], rho_ini[void] = 0.995, 0.0
     rho_field.vector.array[:] = rho_ini
     rho_min, rho_max = np.zeros(num_elems), np.ones(num_elems)
     rho_min[solid], rho_max[void] = 0.99, 0.01
-
-    solid_mask.vector.array[:] = solid.astype(float)
 
     date_str = get_date_str(comm)
     filepath = "results/" + date_str + "/"
@@ -313,9 +240,9 @@ def topopt_coating_3d(fem, opt):
 
     plot_freq = opt.get("plot_freq", 1)
     
-    loop, opt_iter, mma_iter, beta, change = 0, 0, 0, 1.0, 2 * opt["opt_tol"]
+    loop, opt_iter, mma_iter, beta, change = 0, 0, 0, 8.0, 1.0
     low, upp = None, None
-    while opt_iter < opt["max_iter"] and change > opt["opt_tol"]:
+    while opt_iter < opt["max_iter"] and (change > opt["opt_tol"] or beta < opt["beta_max"]):
         opt_start_time = time.perf_counter()
         opt_iter += 1
         mma_iter += 1
@@ -323,9 +250,9 @@ def topopt_coating_3d(fem, opt):
 
         # Base filter and projection
         density_filter.forward()
-        if opt_iter > 1 and (opt_iter - 1) % opt["beta_interval"] == 0 and beta < opt["beta_max"]:
-            beta *= 2.0
-            change = opt["opt_tol"] * 2.0
+        if opt_iter > 1 and (opt_iter % opt["beta_interval"] == 0 or change <= opt["opt_tol"]) and beta < opt["beta_max"]:
+            beta *= 1.2
+            change = 1.0
             mma_iter = 1
             # MMA restart logic to match Matlab: xold1=xval; xold2=xold1; low=xval; upp=low;
             rho_old1[:] = rho_field.vector.array
@@ -334,13 +261,9 @@ def topopt_coating_3d(fem, opt):
                 low[:] = rho_field.vector.array
                 upp[:] = rho_field.vector.array
 
-        heaviside0.forward(beta, eta=opt.get("base_eta", 0.5))
-        cg1_filter_base.forward(rho_base0)
         heaviside.forward(beta, eta=opt.get("base_eta", 0.5))
-
-        # SECONDARY FILTER FOR SHELL (Exactly mimics Matlab)
-        shell_beta.value = float(beta / 2.0)
         shell_filter.forward(rho_base)
+        shell_beta.value = float(beta)
 
         # Solve FEM
         linear_problem.solve_fem()
@@ -352,37 +275,39 @@ def topopt_coating_3d(fem, opt):
         # --- Compute Sensitivities ---
         # 1. Compliance
         with dC_drho_base_vec.localForm() as loc: loc.set(0)
-        with dC_drho_Nf_vec.localForm() as loc: loc.set(0)
         assemble_vector(dC_drho_base_vec, dC_drho_base_form)
-        assemble_vector(dC_drho_Nf_vec, dC_drho_Nf_form)
         dC_drho_base_vec.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-        dC_drho_Nf_vec.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+
+        with dC_drho_nf_vec.localForm() as loc: loc.set(0)
+        assemble_vector(dC_drho_nf_vec, dC_drho_nf_form)
+        dC_drho_nf_vec.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
 
         # Removed log(C) scaling to match MATLAB MMA requirements
         
-        # Backpropagate shell gradient sensitivity through the secondary filter
-        dC_drho_base_from_shell = shell_filter.backward(dC_drho_Nf_vec)
-        dC_drho_base_vec.axpy(1.0, dC_drho_base_from_shell) # dJ_base_total = dJ_base + dJ_base_from_shell
-
         # 2. Volume
         with dV_drho_base_vec.localForm() as loc: loc.set(0)
-        with dV_drho_Nf_vec.localForm() as loc: loc.set(0)
         assemble_vector(dV_drho_base_vec, dV_drho_base_form)
-        assemble_vector(dV_drho_Nf_vec, dV_drho_Nf_form)
         dV_drho_base_vec.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-        dV_drho_Nf_vec.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-        
-        dV_drho_base_from_shell = shell_filter.backward(dV_drho_Nf_vec)
-        dV_drho_base_vec.axpy(1.0, dV_drho_base_from_shell)
         dV_drho_base_vec.scale(1.0 / total_vol)
 
+        with dV_drho_nf_vec.localForm() as loc: loc.set(0)
+        assemble_vector(dV_drho_nf_vec, dV_drho_nf_form)
+        dV_drho_nf_vec.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+        dV_drho_nf_vec.scale(1.0 / total_vol)
+
         # Combine sensitivities (Base Projection -> Density Filter)
+        dC_drho_base_from_shell = shell_filter.backward(dC_drho_nf_vec)
+        dV_drho_base_from_shell = shell_filter.backward(dV_drho_nf_vec)
+
+        dC_drho_base_vec.axpy(1.0, dC_drho_base_from_shell)
+        dV_drho_base_vec.axpy(1.0, dV_drho_base_from_shell)
+
         sensitivities = [dC_drho_base_vec, dV_drho_base_vec]
         heaviside.backward(sensitivities)
-        sensitivities_0 = [cg1_filter_base.backward(v) for v in sensitivities]
-        heaviside0.backward(sensitivities_0)
-        [dCdrho, dVdrho] = density_filter.backward(sensitivities_0)
-        for v in sensitivities_0: v.destroy()
+        [dCdrho, dVdrho] = density_filter.backward(sensitivities)
+
+        dC_drho_base_from_shell.destroy()
+        dV_drho_base_from_shell.destroy()
 
         g_vec = np.array([V_value - opt["vol_frac"]])
         dJdrho, dgdrho = dCdrho, np.vstack([dVdrho])
@@ -408,14 +333,10 @@ def topopt_coating_3d(fem, opt):
 
             values = S_comm.gather(rho_tot_plot)
             if comm.rank == 0:
-                plotter.plot(values, loop, path=filepath, slice_normal='x', slice_origin=(5.0, 15.0, 5.0))
+                plotter.plot(values, loop, path=filepath, slice_normal="x", slice_origin=(5.0, 15.0, 5.0), clip_bounds=opt.get("clip_bounds"))
 
     rho_shell = project_expression(rho_shell_expr, V=rho_base.function_space, mesh=fem["mesh"], quadrature_degree=fem["quadrature_degree"])
     rho_total = project_expression(rho_total_expr, V=rho_base.function_space, mesh=fem["mesh"], quadrature_degree=fem["quadrature_degree"])
 
     if comm.rank == 0: print(f"Saving density fields to: {filepath}", flush=True)
     save_density_fields_xdmf(fem["mesh"], fields={"density_base": rho_base, "density_shell": rho_shell, "density_total": rho_total}, path=filepath)
-    
-    # Cleanup explicitly copied PETSc vectors
-    dC_drho_base_from_shell.destroy()
-    dV_drho_base_from_shell.destroy()

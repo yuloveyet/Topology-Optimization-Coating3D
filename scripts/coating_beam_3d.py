@@ -4,18 +4,23 @@ from dolfinx.mesh import create_box, CellType
 
 from fenitop.coating_3d import topopt_coating_3d
 
+# 几何基准尺寸与比例 (长:宽:高)
+length = 50.0
+aspect_ratio = (1.0, 1.0, 3.0)  # Length:Width:Height
+
+width = length * (aspect_ratio[1] / aspect_ratio[0])
+height = length * (aspect_ratio[2] / aspect_ratio[0])
 
 # 1. Define custom physical mesh resolution (design domain)
-mesh_res_phys = [40, 120, 40]
-# Calculate element size (dx, dy, dz) from physical domain [10, 30, 10]
-dx, dy, dz = 10.0 / mesh_res_phys[0], 30.0 / mesh_res_phys[1], 10.0 / mesh_res_phys[2]
+mesh_res_phys = [int(length), int(height), int(width)]  # 1 element per unit length in physical domain
+# Calculate element size (dx, dy, dz) from physical domain
+dx, dy, dz = length / mesh_res_phys[0], height / mesh_res_phys[1], width / mesh_res_phys[2]
 
 # 2. Define shell thickness and filter radii
-tref = 2  # Reference shell thickness
-filter_radius_shell = 2.5 * tref  # Clausen et al. 2017 specification
 
-filter_radius = 2.0 * filter_radius_shell  # Base filter is 2.0x shell filter radius
-
+filter_radius = 0.2 * length  # Base filter radius (R1)
+filter_radius_shell = filter_radius / 2.0  # Shell filter radius (R2 = R1 / 2.0)
+tref = filter_radius_shell / 5.0  # Reference shell thickness (tref = R2 / 5.0)
 # 3. d_ext set to exactly 1.0 * filter_radius as per the paper and Matlab implementation
 d_ext = 1.0 * filter_radius
 
@@ -40,7 +45,7 @@ def create_domain_mesh(comm):
         comm,
         [
             [-actual_d_ext_x, -actual_d_ext_y, -actual_d_ext_z],
-            [10.0 + actual_d_ext_x, 30.0 + actual_d_ext_y, 10.0 + actual_d_ext_z],
+            [length + actual_d_ext_x, height + actual_d_ext_y, width + actual_d_ext_z],
         ],
         mesh_resolution,
         CellType.hexahedron,
@@ -56,19 +61,19 @@ def create_domain_mesh(comm):
     )
 
     remove_top = (
-        (c_coords[:, 1] > 30.0 - 1e-6)
-        & (c_coords[:, 0] >= 4.5 - 1e-6)
-        & (c_coords[:, 0] <= 5.5 + 1e-6)
-        & (c_coords[:, 2] >= 4.5 - 1e-6)
-        & (c_coords[:, 2] <= 5.5 + 1e-6)
+        (c_coords[:, 1] > height - 1e-6)
+        & (c_coords[:, 0] >= length / 2 - 0.5 - 1e-6)
+        & (c_coords[:, 0] <= length / 2 + 0.5 + 1e-6)
+        & (c_coords[:, 2] >= width / 2 - 0.5 - 1e-6)
+        & (c_coords[:, 2] <= width / 2 + 0.5 + 1e-6)
     )
     remove_bottom = (
         (c_coords[:, 1] < 1e-6)
         & (c_coords[:, 0] >= -1e-6)
-        & (c_coords[:, 0] <= 10.0 + 1e-6)
+        & (c_coords[:, 0] <= length + 1e-6)
         & (c_coords[:, 2] >= -1e-6)
-        & (c_coords[:, 2] <= 10.0 + 1e-6)
-        & ((c_coords[:, 0] <= 1.5 + 1e-6) | (c_coords[:, 0] >= 8.5 - 1e-6))
+        & (c_coords[:, 2] <= width + 1e-6)
+        & ((c_coords[:, 0] <= 1.5 + 1e-6) | (c_coords[:, 0] >= length - 1.5 - 1e-6))
     )
 
     cells_to_keep = np.where(~(remove_top | remove_bottom))[0].astype(np.int32)
@@ -90,19 +95,19 @@ fem = {
     "poisson's ratio": 0.25,
     "disp_bc": lambda x: np.isclose(x[1], 0.0)
     & (x[0] >= -1e-6)
-    & (x[0] <= 10.0 + 1e-6)
+    & (x[0] <= length + 1e-6)
     & (x[2] >= -1e-6)
-    & (x[2] <= 10.0 + 1e-6)
-    & (np.less(x[0], 1.5 + dx / 2 + 1e-6) | np.greater(x[0], 8.5 - dx / 2 - 1e-6)),
+    & (x[2] <= width + 1e-6)
+    & (np.less(x[0], 1.5 + dx / 2 + 1e-6) | np.greater(x[0], length - 1.5 - dx / 2 - 1e-6)),
     "traction_bcs": [
         [
             (0.0, 0.0, -2.0),
-            lambda x: np.isclose(x[1], 30.0)
+            lambda x: np.isclose(x[1], height)
             & (
-                np.greater(x[0], 4.5 - dx / 2 - 1e-6)
-                & np.less(x[0], 5.5 + dx / 2 + 1e-6)
-                & np.greater(x[2], 4.5 - dz / 2 - 1e-6)
-                & np.less(x[2], 5.5 + dz / 2 + 1e-6)
+                np.greater(x[0], length / 2 - 0.5 - dx / 2 - 1e-6)
+                & np.less(x[0], length / 2 + 0.5 + dx / 2 + 1e-6)
+                & np.greater(x[2], width / 2 - 0.5 - dz / 2 - 1e-6)
+                & np.less(x[2], width / 2 + 0.5 + dz / 2 + 1e-6)
             ),
         ]
     ],
@@ -122,11 +127,11 @@ opt = {
     # Add a tiny tolerance (1e-6) to prevent exact boundary nodes from being marked as void
     "void_zone": lambda x: (
         (x[0] < -1e-6)
-        | (x[0] > 10.0 + 1e-6)
+        | (x[0] > length + 1e-6)
         | (x[1] < -1e-6)
-        | (x[1] > 30.0 + 1e-6)
+        | (x[1] > height + 1e-6)
         | (x[2] < -1e-6)
-        | (x[2] > 10.0 + 1e-6)
+        | (x[2] > width + 1e-6)
     ),
     "penalty": 3.0,
     "epsilon": 1e-6,
@@ -147,11 +152,11 @@ opt = {
     "shell_eta": 0.5,
     "clip_bounds": [
         0.0,
-        10.0,
+        length,
         0.0,
-        30.0,
+        height,
         0.0,
-        10.0,
+        width,
     ],  # Bounds of the physical domain [xmin, xmax, ymin, ymax, zmin, zmax]
 }
 

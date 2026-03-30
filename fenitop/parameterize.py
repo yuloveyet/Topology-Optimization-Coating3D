@@ -89,7 +89,7 @@ class CG1Filter:
         self.lambda_wrap = la.create_petsc_vector_wrap(self.lambda_adj.x)
 
         dx = ufl.Measure("dx", metadata={"quadrature_degree": 2})
-        r_pde = R / (2.0 * np.sqrt(3.0)) 
+        r_pde = R / (2.0 * np.sqrt(3.0))
         Kf_expr = (r_pde**2 * ufl.dot(ufl.grad(u), ufl.grad(v)) + u * v) * dx
         M_expr = u * v * dx  # Mass matrix for CG1 to CG1
 
@@ -116,15 +116,6 @@ class CG1Filter:
         self.M_mat.assemble()
 
         self.vec_rhs = self.u_in.vector.copy()
-
-        alpha = Constant(self.V.mesh, float(R / np.sqrt(3.0)))
-        self.grad_norm = alpha * ufl.sqrt(ufl.inner(ufl.grad(self.u_out), ufl.grad(self.u_out)) + 1e-12)
-        self.rho_shell_func = Function(V)
-
-    def get_rho_shell_expr(self, eta, beta):
-        import ufl
-        denominator = ufl.tanh(beta * eta) + ufl.tanh(beta * (1.0 - eta))
-        return (ufl.tanh(beta * eta) + ufl.tanh(beta * (self.grad_norm - eta))) / denominator
 
     def forward(self, u_in_func):
         self.M_mat.mult(u_in_func.vector, self.vec_rhs)

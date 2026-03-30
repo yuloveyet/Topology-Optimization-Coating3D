@@ -135,18 +135,27 @@ class CG1Filter:
 class Heaviside:
     def __init__(self, rho_phys):
         self.rho_phys = rho_phys
+        # Pre-allocate for performance and consistency
+        self.drho = np.zeros_like(self.rho_phys.x.array)
 
     def forward(self, beta, eta=0.5):
+        # We work on the local array (including ghosts if needed, but here usually local)
+        # Note: self.rho_phys.x.array is the local + ghost portion
+        rho_arr = self.rho_phys.x.array
         denominator = np.tanh(beta * eta) + np.tanh(beta * (1 - eta))
-        self.drho = (
-            beta * (1 - np.tanh(beta * (self.rho_phys.vector - eta)) ** 2) / denominator
-        )
-        self.rho_phys.vector.array = (
-            np.tanh(beta * eta) + np.tanh(beta * (self.rho_phys.vector - eta))
-        ) / denominator
+        
+        # Compute derivative for backward pass
+        self.drho[:] = beta * (1 - np.tanh(beta * (rho_arr - eta)) ** 2) / denominator
+        
+        # Update the function values
+        rho_arr[:] = (np.tanh(beta * eta) + np.tanh(beta * (rho_arr - eta))) / denominator
         self.rho_phys.x.scatter_forward()
 
     def backward(self, vectors):
+        """Chain rule for Heaviside: vec = vec * drho/drho_in."""
         for vector in vectors:
             if vector is not None:
-                vector.array *= self.drho
+                # Use the local array of the PETSc vector
+                # This assumes vector is a PETSc vector or a Function
+                with vector.localForm() as loc:
+                    loc.array[:] *= self.drho[:loc.array.size]

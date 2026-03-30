@@ -281,10 +281,6 @@ def topopt_coating_3d(fem, opt):
         # Apply shell_beta = beta logic
         shell_beta_val = float(beta)
         shell_beta_constant.value = shell_beta_val
-        
-        rho_shell_func_new = project_expression(rho_shell_expr, V=S, mesh=fem["mesh"], quadrature_degree=fem["quadrature_degree"])
-        rho_shell_func.x.array[:] = rho_shell_func_new.x.array
-        rho_shell_func.x.scatter_forward()
 
         linear_problem.solve_fem()
 
@@ -311,6 +307,10 @@ def topopt_coating_3d(fem, opt):
         dC_drb_direct_vec.axpy(1.0, dC_drb_from_shell)
         dV_drb_direct_vec.axpy(1.0, dV_drb_from_shell)
         dV_drb_direct_vec.scale(1.0 / total_vol)
+
+        # CRITICAL: Forward sync before Heaviside backward to ensure ghost nodes are correct
+        dC_drb_direct_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
+        dV_drb_direct_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
         
         # Pass through Heaviside and Density Filter
         sensitivities = [dC_drb_direct_vec, dV_drb_direct_vec]

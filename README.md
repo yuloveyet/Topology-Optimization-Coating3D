@@ -75,7 +75,7 @@ All results are saved in a time-stamped directory under `results/` (synchronized
 
 ### About the FEniTop Framework
 
-The foundation of this project is **`FEniTop`**, a simple and powerful FEniCSx implementation for 2D and 3D topology optimization, as presented by Jia et al. (2024). `FEniTop` provides a robust, parallel-computing-enabled framework that serves as an excellent launchpad for exploring and implementing advanced topology optimization techniques.
+The foundation of this project is **[`FEniTop`](https://github.com/missionlab/fenitop)**, a simple and powerful FEniCSx implementation for 2D and 3D topology optimization, as presented by Jia et al. (2024). `FEniTop` provides a robust, parallel-computing-enabled framework that serves as an excellent launchpad for exploring and implementing advanced topology optimization techniques.
 
 ### About This Project: Implementing Clausen's 3D Coating
 
@@ -104,4 +104,8 @@ Jia, Y., Wang, C., & Zhang, X. S. (2024). FEniTop: a simple FEniCSx implementati
 
 Additionally, please cite the foundational work for the 3D shell optimization theory:
 > **Clausen, A., Andreassen, E., & Sigmund, O. (2017).** *Topology optimization of 3D shell structures with porous infill.* Acta Mechanica Sinica, 33(4), 778-791.
-a Mechanica Sinica, 33(4), 778-791.
+
+## License
+
+This project is licensed under the **GNU General Public License v3.0**. See the [LICENSE](LICENSE) file for the full text.
+

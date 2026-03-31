@@ -99,6 +99,12 @@
     - [x] **计算性能与稳定性微调**:
         - 提升积分阶数至 `quadrature_degree = 3`，优化了高 $\beta$ 阶段的非线性集成精度。
         - 加严 PETSc 求解容差 (`1e-10`)，提升了 3D 复杂拓扑演化的鲁棒性。
+    - [x] **文档工程与项目发布准备**:
+        - **README 深度重构**: 全面润色项目介绍，明确区分了底层框架 (`FEniTop`) 与本仓库实现的核心算法 (Clausen 3D Coating) 之间的关系，并统一了文献引用格式。
+        - **许可证集成**: 引入并声明了 GNU General Public License v3.0 (GPL-3.0)。
+        - **可视化修复**: 修正了 `pyvista` 绘图中无效的 `Fast` colormap，统一替换为视觉效果更好的 `turbo` 映射。
+        - **物理问题示意图**: 根据代码参数，使用 `matplotlib` 准确绘制了 3D MBB 梁的设计域、边界条件（双侧底部固定）及载荷（顶部中心侧向力）示意图。
+        - **Git 仓库清理**: 完善了 `.gitignore` 规则以排除 `fenitop/topopt.py` 及对话历史记录，并从远程索引中强制清除了早期遗留的测试图片及日志文件。
 
 ## 运行规范
 - **正式计算**: `mpirun -n [核心数] python3 scripts/coating_beam_3d.py`

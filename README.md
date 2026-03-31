@@ -60,6 +60,12 @@ mpirun -n 4 python3 scripts/fd_check.py
 ```
 This will output the relative error between analytical and numerical sensitivities and generate a Log-Log convergence plot.
 
+## Optimization Design Results
+
+Here is an example of the optimization result for a 3D cantilever beam:
+
+![3D Cantilever Beam Optimization Result](images/result_20260331.png)
+
 ## Results & Output
 All results are saved in a time-stamped directory under `results/` (synchronized to UTC+8).
 - `design_*.png`: Longitudinal cross-section slices showing the dense outer shell and porous/void interior.

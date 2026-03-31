@@ -42,3 +42,4 @@ scripts/*
 # Ignore conversation history and raw logs
 CONVERSATION_HISTORY_*.md
 RAW_CONVERSATION_LOG_*.md
+\n# Ignore specific generated files\ntest.png\ntest.pvsm\ncorrect_mbb_beam_schematic.png

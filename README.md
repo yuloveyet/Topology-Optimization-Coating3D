@@ -72,7 +72,23 @@ All results are saved in a time-stamped directory under `results/` (synchronized
 - `design_*.xdmf`: Raw 3D density fields (`rho_total`) ready for rendering and thresholding in ParaView.
 
 ## Acknowledgements
-The codebase, named **fenitop**, translates the coating methodology into the modern FEniCSx (DOLFINx) paradigm.
+
+### About FEniTop
+
+The core codebase, named **`fenitop`**, represents a modern, high-performance implementation of the 3D shell-infill topology optimization methodology, originally proposed by Clausen et al. (2017). Developed using the FEniCSx (DOLFINx) finite element framework, `fenitop` is engineered from the ground up to leverage high-performance computing through MPI parallelization. It provides a robust and flexible platform for academic research and industrial application, focusing on numerical accuracy, computational efficiency, and clear, modular code design.
+
+### Role of Gemini CLI
+
+This project was significantly accelerated and refined with the assistance of **Gemini CLI**, an AI-powered software engineering agent. Gemini's contributions spanned the entire development lifecycle, including:
+
+-   **Rapid Prototyping & Debugging:** Assisting in the translation of complex mathematical formulations from the reference paper into functional Python code and quickly identifying and fixing bugs in the parallel MPI environment.
+-   **Code Refactoring & Optimization:** Improving code modularity, enhancing the efficiency of numerical routines, and ensuring adherence to Python best practices.
+-   **Sensitivity Analysis & Verification:** Automating the generation and execution of finite difference checks (`fd_check.py`) to rigorously validate the analytical gradients, a critical step for optimization convergence.
+-   **Visualization & Post-processing:** Developing and debugging the `pyvista`-based visualization utilities, including generating schematic diagrams of the physical problem setup.
+-   **Version Control & Documentation:** Managing the Git repository, including complex operations like history modification, remote state correction, and enriching this `README.md` file.
+
+Gemini CLI acted as a collaborative partner, enabling the developer to focus on high-level algorithmic and theoretical aspects while handling the detailed implementation and maintenance tasks.
+
 
 ## Citation
 

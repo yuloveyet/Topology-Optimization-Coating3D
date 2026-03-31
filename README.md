@@ -1,6 +1,6 @@
 # Topology Optimization of 3D Shell Structures with Porous Infill
 
-This repository contains a high-performance, parallelized 3D topology optimization framework implemented in **FEniCSx**. It is specifically designed to create shell structures with porous/void interiors, extending the 2D coating approach to 3D as described in the seminal paper:
+This repository showcases a high-performance, parallelized implementation of the 3D shell-infill topology optimization methodology, as proposed by **Clausen et al. (2017)**. This implementation is built upon the foundational **`FEniTop`** framework, a versatile and efficient FEniCSx-based platform for topology optimization.
 
 > **Clausen, A., Andreassen, E., & Sigmund, O. (2017).**
 > *Topology optimization of 3D shell structures with porous infill.*
@@ -73,9 +73,13 @@ All results are saved in a time-stamped directory under `results/` (synchronized
 
 ## Acknowledgements
 
-### About FEniTop
+### About the FEniTop Framework
 
-The core codebase, named **`fenitop`**, represents a modern, high-performance implementation of the 3D shell-infill topology optimization methodology, originally proposed by Clausen et al. (2017). Developed using the FEniCSx (DOLFINx) finite element framework, `fenitop` is engineered from the ground up to leverage high-performance computing through MPI parallelization. It provides a robust and flexible platform for academic research and industrial application, focusing on numerical accuracy, computational efficiency, and clear, modular code design.
+The foundation of this project is **`FEniTop`**, a simple and powerful FEniCSx implementation for 2D and 3D topology optimization, as presented by Jia et al. (2024). `FEniTop` provides a robust, parallel-computing-enabled framework that serves as an excellent launchpad for exploring and implementing advanced topology optimization techniques.
+
+### About This Project: Implementing Clausen's 3D Coating
+
+This repository extends the capabilities of the `FEniTop` framework by integrating the specialized 3D shell-infill (coating) methodology from the seminal paper by Clausen et al. (2017). The core contribution of this work is the successful implementation of Clausen's complex, gradient-based shell definition, two-step PDE filtering, and Hashin-Shtrikman material interpolation within the modular structure of `FEniTop`.
 
 ### Role of Gemini CLI
 

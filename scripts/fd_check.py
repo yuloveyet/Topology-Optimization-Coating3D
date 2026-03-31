@@ -22,7 +22,7 @@ def main():
 
     # Mesh parameters matching coating_beam_3d.py
     # 几何基准尺寸与比例 (长:宽:高)
-    length = 10.0
+    length = 50.0
     aspect_ratio = (1.0, 1.0, 3.0)  # Length:Width:Height
 
     width = length * (aspect_ratio[1] / aspect_ratio[0])
@@ -30,7 +30,7 @@ def main():
 
     # 网格分辨率基准 (nx)，其余方向将根据 aspect_ratio 自动缩放
     # 可自由修改此参数以整体调整网格精细度
-    base_mesh_res = 10 
+    base_mesh_res = 30 
     mesh_res_phys = [
         int(base_mesh_res * aspect_ratio[0]),  # nx
         int(base_mesh_res * aspect_ratio[2]),  # ny (Height direction)
@@ -83,20 +83,16 @@ def main():
     # Remove top padded elements at the load region
     remove_top = (
         (c_coords[:, 1] > height - 1e-6)
-        & (c_coords[:, 0] >= length / 2 - 0.5 - 1e-6)
-        & (c_coords[:, 0] <= length / 2 + 0.5 + 1e-6)
-        & (c_coords[:, 2] >= width / 2 - 0.5 - 1e-6)
-        & (c_coords[:, 2] <= width / 2 + 0.5 + 1e-6)
+        & (c_coords[:, 0] >= length / 2 - 0.5 - actual_d_ext_x - 1e-6)
+        & (c_coords[:, 0] <= length / 2 + 0.5 + actual_d_ext_x + 1e-6)
+        & (c_coords[:, 2] >= width / 2 - 0.5 - actual_d_ext_z - 1e-6)
+        & (c_coords[:, 2] <= width / 2 + 0.5 + actual_d_ext_z + 1e-6)
     )
 
     # Remove bottom padded elements at the support regions
     remove_bottom = (
         (c_coords[:, 1] < 1e-6)
-        & (c_coords[:, 0] >= -1e-6)
-        & (c_coords[:, 0] <= length + 1e-6)
-        & (c_coords[:, 2] >= -1e-6)
-        & (c_coords[:, 2] <= width + 1e-6)
-        & ((c_coords[:, 0] <= 1.5 + 1e-6) | (c_coords[:, 0] >= length - 1.5 - 1e-6))
+        & ((c_coords[:, 0] <= 1.5 + actual_d_ext_x + 1e-6) | (c_coords[:, 0] >= length - 1.5 - actual_d_ext_x - 1e-6))
     )
 
     # Keep cells that are not in the removed regions
@@ -345,11 +341,11 @@ def main():
         inner_pool = [p for p in flattened if p[2] == "Inner"]
         bound_pool = [p for p in flattened if p[2] == "Boundary"]
 
-        # Pick 5 of each
+        # Pick a few of each
         import random
 
-        selected_inner = random.sample(inner_pool, min(len(inner_pool), 5))
-        selected_bound = random.sample(bound_pool, min(len(bound_pool), 5))
+        selected_inner = random.sample(inner_pool, min(len(inner_pool), 3))
+        selected_bound = random.sample(bound_pool, min(len(bound_pool), 3))
         test_points = selected_inner + selected_bound
 
         print(
@@ -379,12 +375,12 @@ def main():
 
         if rank == 0:
             print(f"\n--- Point {label} (Rank {p_rank}, Local Idx {p_idx}) ---")
-            print(f"Analytical dC/drho: {a_dC: .6e}")
-            print(f"Analytical dV/drho: {a_dV: .6e}")
+            print(f"Analytical dC/drho: {a_dC: .10e}")
+            print(f"Analytical dV/drho: {a_dV: .10e}")
             print(
-                f"{'dh':<10} | {'FD dC':<15} | {'Error %':<10} | {'FD dV':<15} | {'Error %':<10}"
+                f"{'dh':<10} | {'FD dC':<15} | {'RelErr C%':<10} | {'FD dV':<15} | {'RelErr V%':<10}"
             )
-            print("-" * 75)
+            print("-" * 80)
 
         point_errors_C = []
         point_errors_V = []

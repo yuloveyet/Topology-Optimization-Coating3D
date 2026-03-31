@@ -55,8 +55,8 @@ mpirun -n 8 python3 scripts/coating_beam_3d.py
 A finite difference testing script is included to verify the exactness of the analytical gradients (derived via UFL automatic differentiation and adjoint backward passes through the PDE filters).
 
 ```bash
-# Run in serial for accurate finite difference checks
-python3 scripts/fd_check.py
+# Run in parallel for high-speed finite difference checks
+mpirun -n 4 python3 scripts/fd_check.py
 ```
 This will output the relative error between analytical and numerical sensitivities and generate a Log-Log convergence plot.
 
@@ -78,3 +78,4 @@ Jia, Y., Wang, C., & Zhang, X. S. (2024). FEniTop: a simple FEniCSx implementati
 
 Additionally, please cite the foundational work for the 3D shell optimization theory:
 > **Clausen, A., Andreassen, E., & Sigmund, O. (2017).** *Topology optimization of 3D shell structures with porous infill.* Acta Mechanica Sinica, 33(4), 778-791.
+a Mechanica Sinica, 33(4), 778-791.

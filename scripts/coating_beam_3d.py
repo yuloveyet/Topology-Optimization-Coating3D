@@ -5,14 +5,20 @@ from dolfinx.mesh import create_box, CellType
 from fenitop.coating_3d import topopt_coating_3d
 
 # 几何基准尺寸与比例 (长:宽:高)
-length = 50.0
+length = 30.0
 aspect_ratio = (1.0, 1.0, 3.0)  # Length:Width:Height
 
 width = length * (aspect_ratio[1] / aspect_ratio[0])
 height = length * (aspect_ratio[2] / aspect_ratio[0])
 
-# 1. Define custom physical mesh resolution (design domain)
-mesh_res_phys = [int(length), int(height), int(width)]  # 1 element per unit length in physical domain
+# 网格分辨率基准 (nx)，其余方向将根据 aspect_ratio 自动缩放
+# 可自由修改此参数以整体调整网格精细度 (若遇到 OOM 问题，请调低此值，如 30 或 40)
+base_mesh_res = 50 
+mesh_res_phys = [
+    int(base_mesh_res * aspect_ratio[0]),  # nx (Length direction)
+    int(base_mesh_res * aspect_ratio[2]),  # ny (Height direction)
+    int(base_mesh_res * aspect_ratio[1]),  # nz (Width direction)
+]
 # Calculate element size (dx, dy, dz) from physical domain
 dx, dy, dz = length / mesh_res_phys[0], height / mesh_res_phys[1], width / mesh_res_phys[2]
 
@@ -62,18 +68,14 @@ def create_domain_mesh(comm):
 
     remove_top = (
         (c_coords[:, 1] > height - 1e-6)
-        & (c_coords[:, 0] >= length / 2 - 0.5 - 1e-6)
-        & (c_coords[:, 0] <= length / 2 + 0.5 + 1e-6)
-        & (c_coords[:, 2] >= width / 2 - 0.5 - 1e-6)
-        & (c_coords[:, 2] <= width / 2 + 0.5 + 1e-6)
+        & (c_coords[:, 0] >= length / 2 - 0.5 - actual_d_ext_x - 1e-6)
+        & (c_coords[:, 0] <= length / 2 + 0.5 + actual_d_ext_x + 1e-6)
+        & (c_coords[:, 2] >= width / 2 - 0.5 - actual_d_ext_z - 1e-6)
+        & (c_coords[:, 2] <= width / 2 + 0.5 + actual_d_ext_z + 1e-6)
     )
     remove_bottom = (
         (c_coords[:, 1] < 1e-6)
-        & (c_coords[:, 0] >= -1e-6)
-        & (c_coords[:, 0] <= length + 1e-6)
-        & (c_coords[:, 2] >= -1e-6)
-        & (c_coords[:, 2] <= width + 1e-6)
-        & ((c_coords[:, 0] <= 1.5 + 1e-6) | (c_coords[:, 0] >= length - 1.5 - 1e-6))
+        & ((c_coords[:, 0] <= 1.5 + actual_d_ext_x + 1e-6) | (c_coords[:, 0] >= length - 1.5 - actual_d_ext_x - 1e-6))
     )
 
     cells_to_keep = np.where(~(remove_top | remove_bottom))[0].astype(np.int32)
@@ -112,10 +114,13 @@ fem = {
         ]
     ],
     "body_force": (0, 0, 0),
-    "quadrature_degree": 2,
+    "quadrature_degree": 3,
     "petsc_options": {
         "ksp_type": "cg",
         "pc_type": "gamg",
+        "ksp_rtol": 1e-10,
+        "ksp_atol": 1e-12,
+        "ksp_max_it": 1000,
     },
 }
 
@@ -150,6 +155,8 @@ opt = {
     "q_ext_padding": 0.2,  # Soft modulus for padding region
     "penal_shell": 1.0,  # Coating penalty pg=1 (Section 2.3 in paper)
     "shell_eta": 0.5,
+    "slice_normal": "x",
+    "slice_origin": (length / 2.0, height / 2.0, width / 2.0),
     "clip_bounds": [
         0.0,
         length,

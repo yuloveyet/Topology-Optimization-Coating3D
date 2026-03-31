@@ -164,24 +164,38 @@ def form_fem_coating_3d(fem, opt):
 
 
 def project_expression(expr, V, mesh, quadrature_degree):
+    """
+    Project an expression onto a function space V using a Mass-Lumped approach.
+    Unlike standard L2 projection, Mass-Lumping preserves the Maximum Principle,
+    ensuring that if 0 <= expr <= 1, the projected function also strictly 
+    remains within [0, 1] without numerical overshoot (Gibbs phenomenon).
+    """
     out = Function(V)
-    w, phi = ufl.TrialFunction(V), ufl.TestFunction(V)
+    phi = ufl.TestFunction(V)
     dx = ufl.Measure("dx", domain=mesh, metadata={"quadrature_degree": quadrature_degree})
-    a_form, L_form = form(w * phi * dx), form(expr * phi * dx)
-    A, b = create_matrix(a_form), create_vector(L_form)
-    assemble_matrix(A, a_form)
-    A.assemble()
+    
+    # Assembly of the Right-Hand Side: b_i = int(expr * phi_i * dx)
+    L_form = form(expr * phi * dx)
+    b = create_vector(L_form)
     assemble_vector(b, L_form)
     b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
-    solver = PETSc.KSP().create(mesh.comm)
-    solver.setOperators(A)
-    solver.setType("cg")
-    solver.getPC().setType("gamg")
-    solver.setFromOptions()
-    x = la.create_petsc_vector_wrap(out.x)
-    solver.solve(b, x)
+    
+    # Assembly of the Diagonal Lumped Mass Matrix: D_i = int(phi_i * dx)
+    # Using a Constant(1.0) directly integrates the test functions over the domain
+    M_lumped_form = form(Constant(mesh, 1.0) * phi * dx)
+    M_lumped_vec = create_vector(M_lumped_form)
+    assemble_vector(M_lumped_vec, M_lumped_form)
+    M_lumped_vec.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+    
+    # Element-wise division: x_i = b_i / D_i
+    # We use PETSc PointwiseDivide: out = b / M_lumped_vec
+    out_petsc = la.create_petsc_vector_wrap(out.x)
+    out_petsc.pointwiseDivide(b, M_lumped_vec)
     out.x.scatter_forward()
-    solver.destroy(); A.destroy(); b.destroy()
+    
+    b.destroy()
+    M_lumped_vec.destroy()
+    
     return out
 
 
@@ -192,7 +206,7 @@ def save_density_fields_xdmf(mesh, fields, path):
         xdmf.write_mesh(mesh)
         for name, f in fields.items():
             f.name = name
-            xdmf.write_function(f)
+            xdmf.write_function(f, t=0.0)
 
 
 def topopt_coating_3d(fem, opt):
@@ -343,7 +357,9 @@ def topopt_coating_3d(fem, opt):
 
             values = S_comm.gather(rho_tot_plot)
             if comm.rank == 0:
-                plotter.plot(values, loop, path=filepath, slice_normal="x", slice_origin=(5.0, 15.0, 5.0), clip_bounds=opt.get("clip_bounds"))
+                slice_origin = opt.get("slice_origin", (5.0, 15.0, 5.0))
+                slice_normal = opt.get("slice_normal", "x")
+                plotter.plot(values, loop, path=filepath, slice_normal=slice_normal, slice_origin=slice_origin, clip_bounds=opt.get("clip_bounds"))
 
     rho_shell_final = project_expression(rho_shell_expr, V=S, mesh=fem["mesh"], quadrature_degree=fem["quadrature_degree"])
     rho_total_final = project_expression(rho_total_expr, V=S, mesh=fem["mesh"], quadrature_degree=fem["quadrature_degree"])

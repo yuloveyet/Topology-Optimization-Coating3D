@@ -263,7 +263,7 @@ class Plotter:
             plotter.add_mesh(
                 grid,
                 clim=[0, 1],
-                cmap="Fast",
+                cmap="turbo",
                 lighting=lighting,
                 show_scalar_bar=False,
             )

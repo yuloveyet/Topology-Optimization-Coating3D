@@ -231,7 +231,7 @@ class Plotter:
         self.grid = pyvista.UnstructuredGrid(elements, cell_types, nodes)
 
 
-    def plot(self, density, loop, path, threshold=0.49, smooth_iter=100, slice_normal=None, slice_origin=None, clip_bounds=None):
+    def plot(self, density, loop, path, threshold=0.01, smooth_iter=100, slice_normal=None, slice_origin=None, clip_bounds=None):
         # Create a fresh copy to avoid modifying the cached grid
         grid = pyvista.UnstructuredGrid(self.grid)
         # Clear existing point data
@@ -263,7 +263,7 @@ class Plotter:
             plotter.add_mesh(
                 grid,
                 clim=[0, 1],
-                cmap="coolwarm",
+                cmap="Fast",
                 lighting=lighting,
                 show_scalar_bar=False,
             )

@@ -13,7 +13,7 @@ height = length * (aspect_ratio[2] / aspect_ratio[0])
 
 # 网格分辨率基准 (nx)，其余方向将根据 aspect_ratio 自动缩放
 # 可自由修改此参数以整体调整网格精细度 (若遇到 OOM 问题，请调低此值，如 30 或 40)
-base_mesh_res = 50 
+base_mesh_res = 60 
 mesh_res_phys = [
     int(base_mesh_res * aspect_ratio[0]),  # nx (Length direction)
     int(base_mesh_res * aspect_ratio[2]),  # ny (Height direction)
@@ -24,7 +24,7 @@ dx, dy, dz = length / mesh_res_phys[0], height / mesh_res_phys[1], width / mesh_
 
 # 2. Define shell thickness and filter radii
 
-filter_radius = 0.2 * length  # Base filter radius (R1)
+filter_radius = 10  # Base filter radius (R1)
 filter_radius_shell = filter_radius / 2.0  # Shell filter radius (R2 = R1 / 2.0)
 tref = filter_radius_shell / 5.0  # Reference shell thickness (tref = R2 / 5.0)
 # 3. d_ext set to exactly 1.0 * filter_radius as per the paper and Matlab implementation

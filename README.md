@@ -15,13 +15,11 @@ This repository showcases a high-performance, parallelized implementation of the
 
 ## Project Architecture
 
-The repository is structured to separate core algorithmic logic, execution scripts, and comparative baselines:
+The repository is structured as follows:
 
 -   **`fenitop/`**: The core framework library containing implementations for PDE filters, material interpolation models, sensitivity analysis, optimization loops, and parallel visualization utilities.
 -   **`scripts/`**: Ready-to-use execution and validation scripts, such as the main 3D coating beam runner (`coating_beam_3d.py`) and the parallel finite difference verifier (`fd_check.py`).
--   **`Matlab/`**: The original MATLAB implementations from the reference literature, provided for mathematical logic benchmarking and algorithmic alignment.
 -   **`results/`**: The default output directory storing iterative optimization results, including PNG cross-section slices and 3D XDMF density fields.
--   **`meshes/`**: A directory for storing predefined finite element initial mesh files.
 
 ## Installation
 

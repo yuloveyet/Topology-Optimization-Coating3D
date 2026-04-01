@@ -22,7 +22,7 @@ def main():
 
     # Mesh parameters matching coating_beam_3d.py
     # 几何基准尺寸与比例 (长:宽:高)
-    length = 50.0
+    length = 30.0
     aspect_ratio = (1.0, 1.0, 3.0)  # Length:Width:Height
 
     width = length * (aspect_ratio[1] / aspect_ratio[0])
@@ -36,7 +36,7 @@ def main():
         int(base_mesh_res * aspect_ratio[2]),  # ny (Height direction)
         int(base_mesh_res * aspect_ratio[1]),  # nz (Width direction)
     ]
-    dx_m, dy_m, dz_m = (
+    h_x, h_y, h_z = (
         length / mesh_res_phys[0],
         height / mesh_res_phys[1],
         width / mesh_res_phys[2],
@@ -47,12 +47,12 @@ def main():
     tref = filter_radius_shell / 5.0
     d_ext = 1.0 * filter_radius
 
-    n_pad_x = int(np.ceil(d_ext / dx_m))
-    n_pad_y = int(np.ceil(d_ext / dy_m))
-    n_pad_z = int(np.ceil(d_ext / dz_m))
-    actual_d_ext_x = n_pad_x * dx_m
-    actual_d_ext_y = n_pad_y * dy_m
-    actual_d_ext_z = n_pad_z * dz_m
+    n_pad_x = int(np.ceil(d_ext / h_x))
+    n_pad_y = int(np.ceil(d_ext / h_y))
+    n_pad_z = int(np.ceil(d_ext / h_z))
+    actual_d_ext_x = n_pad_x * h_x
+    actual_d_ext_y = n_pad_y * h_y
+    actual_d_ext_z = n_pad_z * h_z
 
     mesh_resolution = [
         mesh_res_phys[0] + 2 * n_pad_x,
@@ -111,18 +111,18 @@ def main():
         & (x[2] >= -1e-6)
         & (x[2] <= width + 1e-6)
         & (
-            np.less(x[0], 1.5 + dx_m / 2 + 1e-6)
-            | np.greater(x[0], length - 1.5 - dx_m / 2 - 1e-6)
+            np.less(x[0], 1.5 + h_x / 2 + 1e-6)
+            | np.greater(x[0], length - 1.5 - h_x / 2 - 1e-6)
         ),
         "traction_bcs": [
             [
                 (0.0, 0.0, -2.0),
                 lambda x: np.isclose(x[1], height)
                 & (
-                    np.greater(x[0], length / 2 - 0.5 - dx_m / 2 - 1e-6)
-                    & np.less(x[0], length / 2 + 0.5 + dx_m / 2 + 1e-6)
-                    & np.greater(x[2], width / 2 - 0.5 - dz_m / 2 - 1e-6)
-                    & np.less(x[2], width / 2 + 0.5 + dz_m / 2 + 1e-6)
+                    np.greater(x[0], length / 2 - 0.5 - h_x / 2 - 1e-6)
+                    & np.less(x[0], length / 2 + 0.5 + h_x / 2 + 1e-6)
+                    & np.greater(x[2], width / 2 - 0.5 - h_z / 2 - 1e-6)
+                    & np.less(x[2], width / 2 + 0.5 + h_z / 2 + 1e-6)
                 ),
             ]
         ],
@@ -324,7 +324,7 @@ def main():
             local_candidates.append((rank, int(idx), "Inner"))
 
     # 2. Structural Boundary (Surface): Exactly on the cylinder interface where gradient is max
-    surface_indices = np.where((~is_padding) & (np.abs(dist_to_axis - r_cyl) < 1.0 * dx_m))[0]
+    surface_indices = np.where((~is_padding) & (np.abs(dist_to_axis - r_cyl) < 1.0 * h_x))[0]
     if len(surface_indices) > 0:
         num_pick = min(len(surface_indices), 5)
         picked_indices = np.random.choice(surface_indices, num_pick, replace=False)
@@ -344,8 +344,8 @@ def main():
         # Pick a few of each
         import random
 
-        selected_inner = random.sample(inner_pool, min(len(inner_pool), 3))
-        selected_bound = random.sample(bound_pool, min(len(bound_pool), 3))
+        selected_inner = random.sample(inner_pool, min(len(inner_pool), 5))
+        selected_bound = random.sample(bound_pool, min(len(bound_pool), 5))
         test_points = selected_inner + selected_bound
 
         print(

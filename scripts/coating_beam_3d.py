@@ -19,8 +19,8 @@ mesh_res_phys = [
     int(base_mesh_res * aspect_ratio[2]),  # ny (Height direction)
     int(base_mesh_res * aspect_ratio[1]),  # nz (Width direction)
 ]
-# Calculate element size (dx, dy, dz) from physical domain
-dx, dy, dz = length / mesh_res_phys[0], height / mesh_res_phys[1], width / mesh_res_phys[2]
+# Calculate element size (h_x, h_y, h_z) from physical domain
+h_x, h_y, h_z = length / mesh_res_phys[0], height / mesh_res_phys[1], width / mesh_res_phys[2]
 
 # 2. Define shell thickness and filter radii
 
@@ -31,13 +31,13 @@ tref = filter_radius_shell / 5.0  # Reference shell thickness (tref = R2 / 5.0)
 d_ext = 1.0 * filter_radius
 
 # 4. Calculate padding elements to ensure perfect boundary alignment
-n_pad_x = int(np.ceil(d_ext / dx))
-n_pad_y = int(np.ceil(d_ext / dy))
-n_pad_z = int(np.ceil(d_ext / dz))
+n_pad_x = int(np.ceil(d_ext / h_x))
+n_pad_y = int(np.ceil(d_ext / h_y))
+n_pad_z = int(np.ceil(d_ext / h_z))
 # Re-calculate exact d_ext to be a multiple of element size
-actual_d_ext_x = n_pad_x * dx
-actual_d_ext_y = n_pad_y * dy
-actual_d_ext_z = n_pad_z * dz
+actual_d_ext_x = n_pad_x * h_x
+actual_d_ext_y = n_pad_y * h_y
+actual_d_ext_z = n_pad_z * h_z
 
 mesh_resolution = [
     mesh_res_phys[0] + 2 * n_pad_x,
@@ -100,16 +100,16 @@ fem = {
     & (x[0] <= length + 1e-6)
     & (x[2] >= -1e-6)
     & (x[2] <= width + 1e-6)
-    & (np.less(x[0], 1.5 + dx / 2 + 1e-6) | np.greater(x[0], length - 1.5 - dx / 2 - 1e-6)),
+    & (np.less(x[0], 1.5 + h_x / 2 + 1e-6) | np.greater(x[0], length - 1.5 - h_x / 2 - 1e-6)),
     "traction_bcs": [
         [
             (0.0, 0.0, -2.0),
             lambda x: np.isclose(x[1], height)
             & (
-                np.greater(x[0], length / 2 - 0.5 - dx / 2 - 1e-6)
-                & np.less(x[0], length / 2 + 0.5 + dx / 2 + 1e-6)
-                & np.greater(x[2], width / 2 - 0.5 - dz / 2 - 1e-6)
-                & np.less(x[2], width / 2 + 0.5 + dz / 2 + 1e-6)
+                np.greater(x[0], length / 2 - 0.5 - h_x / 2 - 1e-6)
+                & np.less(x[0], length / 2 + 0.5 + h_x / 2 + 1e-6)
+                & np.greater(x[2], width / 2 - 0.5 - h_z / 2 - 1e-6)
+                & np.less(x[2], width / 2 + 0.5 + h_z / 2 + 1e-6)
             ),
         ]
     ],
@@ -145,9 +145,9 @@ opt = {
     "beta_initial": 1.0,
     "beta_inc": 2,
     "beta_interval": 20,
-    "beta_max": 64,
+    "beta_max": 64*2,
     "use_oc": False,
-    "move": 0.05,
+    "move": 0.02,
     "opt_compliance": True,
     "plot_freq": 10,
     # Parameters aligned with Clausen et al. (2017) paper

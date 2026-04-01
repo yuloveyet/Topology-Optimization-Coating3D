@@ -1,6 +1,16 @@
-# Topology Optimization of 3D Shell Structures with Porous Infill
+# Topology Optimization of 3D Shell Structures with Porous Infill: A Vibe Coding Case Study
 
-This repository showcases a high-performance, parallelized implementation of the 3D shell-infill (coating) topology optimization methodology. It is built upon the foundational **[`FEniTop`](https://github.com/missionlab/fenitop)** framework, extending its capabilities to realize complex, gradient-based shell definitions in a 3D FEniCSx environment.
+This repository showcases a high-performance, parallelized implementation of the 3D shell-infill (coating) topology optimization methodology. 
+
+## What is Vibe Coding?
+
+**Vibe Coding** is a modern software engineering paradigm where the developer focuses on conveying high-level architectural "vibes," mathematical intent, and physical constraints to an AI agent (in this case, **Gemini CLI**), which then handles the heavy lifting of implementation, debugging, and cross-platform synchronization. 
+
+This project serves as a **Vibe Coding Case Study**, demonstrating how complex scientific computing tasks—specifically 3D finite element analysis and gradient-based optimization—can be rapidly realized from theoretical papers (e.g., Clausen et al., 2017) into a production-ready FEniCSx environment with AI as a primary collaborative partner.
+
+## Project Overview
+
+The implementation is built upon the foundational **[`FEniTop`](https://github.com/missionlab/fenitop)** framework, extending its capabilities to realize complex, gradient-based shell definitions in a 3D FEniCSx environment.
 
 ## Key Features
 

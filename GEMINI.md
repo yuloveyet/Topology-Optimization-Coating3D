@@ -1,8 +1,8 @@
 # GEMINI 项目管理手册
 
 ## 项目概述
-本项目是一个基于 **FEniCSx (DOLFINx)** 的高性能并行拓扑优化框架，名为 `fenitop`。
-专注于 3D 壳层结构与多孔填充（Shell-Infill）优化，严格遵循 Clausen et al. (2017) 的理论体系。
+本项目是一个基于 **FEniCSx (DOLFINx)** 框架 `fenitop` 开发的 3D 梁壳层填充（3D Beam Coating）优化测试案例（vibe coding test）。
+专注于实现 3D 壳层结构与多孔填充（Shell-Infill）优化的全流程验证，严格遵循 Clausen et al. (2017) 的理论体系。
 
 ## 核心目录说明
 - `fenitop/`: 核心算法库（包含 PDE 过滤器、材料插值、灵敏度分析、可视化工具等）。

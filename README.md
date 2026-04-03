@@ -77,7 +77,7 @@ mpirun -n 4 python3 scripts/fd_check.py
 
 Cross-section of an optimized 3D structural beam, highlighting the dense outer shell and porous interior:
 
-![3D Beam Optimization Result](images/test-2.png)
+![3D Beam Optimization Result](images/test-3.png)
 
 ### Results & Output Format
 -   `design_*.png`: High-resolution longitudinal cross-sections.
